@@ -33,40 +33,47 @@ const saveSettingsBtn = document.getElementById('settings-save');
 /* ── Init ─────────────────────────────────────────────── */
 
 async function init() {
-  settings = getSettings();
+  try {
+    settings = getSettings();
 
-  // Scene
-  initScene(canvas, settings.bgColor);
+    // Scene
+    initScene(canvas, settings.bgColor);
 
-  // Apply saved background
-  document.documentElement.style.setProperty('--bg', settings.bgColor);
-  bgColorInp.value = settings.bgColor;
+    // Apply saved background
+    document.documentElement.style.setProperty('--bg', settings.bgColor);
+    bgColorInp.value = settings.bgColor;
 
-  // Settings form
-  endpointInp.value = settings.endpoint;
-  tokenInp.value = settings.token;
+    // Settings form
+    endpointInp.value = settings.endpoint;
+    tokenInp.value = settings.token;
 
-  // Load saved model or show file picker prompt
-  const saved = await loadModel();
-  if (saved && saved.data) {
-    try {
-      await loadVRM(saved.data, saved.name);
-      modelPrompt.classList.add('hidden');
-      setStatus('connected', 'Ready');
-      enableChat();
-    } catch (err) {
-      console.error('Failed to load saved model:', err);
+    // Load saved model or show file picker prompt
+    const saved = await loadModel();
+    if (saved && saved.data) {
+      try {
+        await loadVRM(saved.data, saved.name);
+        modelPrompt.classList.add('hidden');
+        setStatus('connected', 'Ready');
+      } catch (err) {
+        console.error('Failed to load saved model:', err);
+        await tryLoadDefault();
+      }
+    } else {
       await tryLoadDefault();
     }
-  } else {
-    await tryLoadDefault();
+
+    // Resize handler
+    window.addEventListener('resize', () => canvas.style.width = '');
+  } catch (err) {
+    console.error('Init error:', err);
+    setStatus('error', 'Init failed: ' + err.message);
   }
 
-  // Resize handler (debounced)
-  window.addEventListener('resize', () => canvas.style.width = '');
-
-  // Event wiring
+  // Event wiring — always runs, even if init partially fails
   wireEvents();
+
+  // Chat always available (model is optional)
+  enableChat();
 }
 
 function wireEvents() {
@@ -245,10 +252,12 @@ async function tryLoadDefault() {
       await loadVRM(buf, 'AliciaSolid.vrm');
       modelPrompt.classList.add('hidden');
       setStatus('connected', 'Ready');
-      enableChat();
       return;
     }
-  } catch { /* no default model */ }
+    console.warn('Default model not found (HTTP ' + resp.status + ')');
+  } catch (err) {
+    console.warn('Default model load failed:', err.message);
+  }
   modelPrompt.classList.remove('hidden');
   setStatus('error', 'No model loaded');
 }
