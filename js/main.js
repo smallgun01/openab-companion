@@ -8,7 +8,8 @@ import { getSettings, saveSettings, saveModel, loadModel } from './settings.js';
 // Dynamic imports — VRM module may fail; chat always works
 let initScene, loadVRM, getVRM, setBackgroundColor;
 let vrmAvailable = false;
-(async () => {
+let vrmErrorMsg = '';
+const vrmReady = (async () => {
   try {
     const mod = await import('./vrm-scene.js');
     initScene = mod.initScene;
@@ -17,7 +18,8 @@ let vrmAvailable = false;
     setBackgroundColor = mod.setBackgroundColor;
     vrmAvailable = true;
   } catch (err) {
-    console.warn('VRM scene unavailable (CDN may be blocked):', err.message);
+    vrmErrorMsg = err.message || String(err);
+    console.warn('VRM scene unavailable:', vrmErrorMsg);
     setBackgroundColor = () => {};
   }
 })();
@@ -54,13 +56,17 @@ async function init() {
   try {
     settings = getSettings();
 
+    // Wait for VRM module to load (or fail)
+    await vrmReady;
+
     // VRM Scene (may be unavailable — chat still works)
     if (vrmAvailable && initScene) {
       initScene(canvas, settings.bgColor);
       window.addEventListener('resize', () => canvas.style.width = '');
     } else {
       // VRM unavailable — show a friendly placeholder
-      modelPrompt.innerHTML = '<p>🎭 3D renderer unavailable</p><p style="font-size:0.8rem">Chat still works — set your endpoint in Settings (⚙️)</p>';
+      const hint = vrmErrorMsg ? `<br><span style="font-size:0.7rem;color:#999">${vrmErrorMsg}</span>` : '';
+      modelPrompt.innerHTML = `<p>🎭 3D renderer unavailable${hint}</p><p style="font-size:0.8rem">Chat still works — set your endpoint in Settings (⚙️)</p>`;
     }
 
     // Apply saved background
