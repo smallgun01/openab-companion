@@ -24,13 +24,13 @@
       <div id="chat-header">
         <h1>OpenAB Companion</h1>
         <div id="header-actions">
-          <button class="icon-btn" id="change-model-btn" title="Change model">🎭</button>
-          <input type="file" id="model-file-input" accept=".vrm" hidden>
-          <button class="icon-btn" id="settings-btn" title="Settings">⚙️</button>
+          <button class="icon-btn" id="change-model-btn" title="Change model" aria-label="Change VRM model">🎭</button>
+          <input type="file" id="model-file-input" accept=".vrm" hidden aria-hidden="true">
+          <button class="icon-btn" id="settings-btn" title="Settings" aria-label="Open settings">⚙️</button>
         </div>
       </div>
 
-      <div id="messages"></div>
+      <div id="messages" role="log" aria-live="polite" aria-label="Chat messages"></div>
 
       <div id="input-area">
         <textarea id="chat-input" rows="1" placeholder="Type a message…" disabled></textarea>

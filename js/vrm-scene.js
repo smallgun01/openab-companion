@@ -169,7 +169,7 @@ function applyBreathing(now) {
     if (spine) {
       spine.position.y += offset;
     }
-  } catch { /* some models may not have named spine */ }
+  } catch { /* model may not have a named spine bone */ }
 }
 
 function applyBlink(now) {
@@ -220,7 +220,7 @@ function applyBlink(now) {
 }
 
 function setBlinkWeight(v) {
-  try { currentVRM.expressionManager.setValue('blink', v); } catch { /* ignore */ }
+  try { currentVRM.expressionManager.setValue('blink', v); } catch { /* blink not supported */ }
 }
 
 function randomBlinkInterval() {

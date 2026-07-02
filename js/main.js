@@ -26,6 +26,8 @@ let vrmAvailable = false;
 let settings;
 let streamingAbort = null;
 let isStreaming = false;
+let retryCount = 0;
+const MAX_RETRIES = 3;
 
 /* ── DOM refs ─────────────────────────────────────────── */
 const app          = document.getElementById('app');
@@ -138,6 +140,7 @@ async function handleSend() {
 
   isStreaming = true;
   sendBtn.disabled = true;
+  retryCount = 0;
   setStatus('connected', 'Typing…');
 
   const abort = new AbortController();
@@ -178,15 +181,22 @@ async function handleSend() {
       setStatus('connected', 'Ready');
     },
     onError(code, msg) {
-      if (code === 429) {
-        addBubble('system', '⚠️ Server busy (429). Retrying in 3 seconds…');
-        setTimeout(() => handleSend(), 3000);
-      } else {
-        addBubble('error', `Error (${code}): ${msg}`);
-      }
       cursorSpan?.remove();
       assistantBubble.classList.remove('streaming');
       finishStream();
+
+      if (code === 429 && retryCount < MAX_RETRIES) {
+        retryCount++;
+        addBubble('system', `⚠️ Server busy — retry ${retryCount}/${MAX_RETRIES}…`);
+        setTimeout(() => handleSend(), 3000);
+        return;
+      }
+
+      if (code === 429) {
+        addBubble('error', '⚠️ Server busy. Please try again later.');
+      } else {
+        addBubble('error', `Error (${code}): ${msg}`);
+      }
       setStatus('error', code ? `Error ${code}` : 'Disconnected');
     },
   });
