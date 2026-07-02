@@ -8,9 +8,9 @@
  *
  * Uses CDN imports: three.js + @pixiv/three-vrm
  */
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170/build/three.module.js';
-import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170/examples/jsm/loaders/GLTFLoader.js';
-import { VRMLoaderPlugin, VRMUtils } from 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3/lib/three-vrm.module.js';
+import * as THREE from 'https://esm.sh/three@0.170.0/build/three.module.js';
+import { GLTFLoader } from 'https://esm.sh/three@0.170.0/examples/jsm/loaders/GLTFLoader.js';
+import { VRMLoaderPlugin, VRMUtils } from 'https://esm.sh/@pixiv/three-vrm@3.0.0/lib/three-vrm.module.js';
 
 let renderer, scene, camera, clock;
 let currentVRM = null;
