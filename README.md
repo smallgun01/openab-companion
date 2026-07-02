@@ -108,4 +108,8 @@ Only the latest user message is sent. History is maintained by the OpenAB persis
 
 ## License
 
-MIT
+**Code**: MIT
+
+**Default model** (`models/AliciaSolid.vrm`): ニコニ立体ちゃん（Alicia Solid）by Dwango Co., Ltd.
+Licensed under the [ニコニ立体ちゃんライセンス](https://3d.nicovideo.jp/alicia/rule.html).
+Free to use, modify, and redistribute (non-corporate). No attribution required.

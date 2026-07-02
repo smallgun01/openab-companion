@@ -56,11 +56,10 @@ async function init() {
       enableChat();
     } catch (err) {
       console.error('Failed to load saved model:', err);
-      modelPrompt.classList.remove('hidden');
-      setStatus('error', 'Model load failed');
+      await tryLoadDefault();
     }
   } else {
-    modelPrompt.classList.remove('hidden');
+    await tryLoadDefault();
   }
 
   // Resize handler (debounced)
@@ -235,6 +234,23 @@ async function handleFilePick(e) {
     console.error(err);
     setStatus('error', `Failed to load: ${err.message}`);
   }
+}
+
+/** Load the bundled default model (Alicia Solid). */
+async function tryLoadDefault() {
+  try {
+    const resp = await fetch('models/AliciaSolid.vrm');
+    if (resp.ok) {
+      const buf = await resp.arrayBuffer();
+      await loadVRM(buf, 'AliciaSolid.vrm');
+      modelPrompt.classList.add('hidden');
+      setStatus('connected', 'Ready');
+      enableChat();
+      return;
+    }
+  } catch { /* no default model */ }
+  modelPrompt.classList.remove('hidden');
+  setStatus('error', 'No model loaded');
 }
 
 function enableChat() {

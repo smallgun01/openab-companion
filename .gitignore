@@ -1,3 +1,4 @@
 models/*.vrm
 !models/.gitkeep
+!models/AliciaSolid.vrm
 .DS_Store
