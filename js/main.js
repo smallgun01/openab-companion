@@ -1,10 +1,26 @@
 /**
  * main.js — Entry point. Wires VRM scene, chat, expression, settings together.
  */
-import { initScene, loadVRM, getVRM, setBackgroundColor } from './vrm-scene.js';
 import { parseAndApply } from './expression.js';
 import { sendMessage } from './chat.js';
 import { getSettings, saveSettings, saveModel, loadModel } from './settings.js';
+
+// Dynamic imports — VRM module may fail; chat always works
+let initScene, loadVRM, getVRM, setBackgroundColor;
+let vrmAvailable = false;
+(async () => {
+  try {
+    const mod = await import('./vrm-scene.js');
+    initScene = mod.initScene;
+    loadVRM = mod.loadVRM;
+    getVRM = mod.getVRM;
+    setBackgroundColor = mod.setBackgroundColor;
+    vrmAvailable = true;
+  } catch (err) {
+    console.warn('VRM scene unavailable (CDN may be blocked):', err.message);
+    setBackgroundColor = () => {};
+  }
+})();
 
 /* ── State ────────────────────────────────────────────── */
 let settings;
@@ -36,8 +52,14 @@ async function init() {
   try {
     settings = getSettings();
 
-    // Scene
-    initScene(canvas, settings.bgColor);
+    // VRM Scene (may be unavailable — chat still works)
+    if (vrmAvailable && initScene) {
+      initScene(canvas, settings.bgColor);
+      window.addEventListener('resize', () => canvas.style.width = '');
+    } else {
+      canvas.style.display = 'none';
+      document.getElementById('model-prompt')?.classList.add('hidden');
+    }
 
     // Apply saved background
     document.documentElement.style.setProperty('--bg', settings.bgColor);
@@ -47,23 +69,24 @@ async function init() {
     endpointInp.value = settings.endpoint;
     tokenInp.value = settings.token;
 
-    // Load saved model or show file picker prompt
-    const saved = await loadModel();
-    if (saved && saved.data) {
-      try {
-        await loadVRM(saved.data, saved.name);
-        modelPrompt.classList.add('hidden');
-        setStatus('connected', 'Ready');
-      } catch (err) {
-        console.error('Failed to load saved model:', err);
+    // Load model (only if VRM available)
+    if (vrmAvailable) {
+      const saved = await loadModel();
+      if (saved && saved.data) {
+        try {
+          await loadVRM(saved.data, saved.name);
+          modelPrompt.classList.add('hidden');
+          setStatus('connected', 'Ready');
+        } catch (err) {
+          console.error('Failed to load saved model:', err);
+          await tryLoadDefault();
+        }
+      } else {
         await tryLoadDefault();
       }
     } else {
-      await tryLoadDefault();
+      setStatus('connected', 'Chat ready (no 3D renderer)');
     }
-
-    // Resize handler
-    window.addEventListener('resize', () => canvas.style.width = '');
   } catch (err) {
     console.error('Init error:', err);
     setStatus('error', 'Init failed: ' + err.message);
@@ -134,7 +157,7 @@ async function handleSend() {
 
       // Apply expression on new complete sentences or every ~20 chars
       if (fullText.length - lastExpressionCheck.length > 20) {
-        const vrm = getVRM();
+        const vrm = vrmAvailable ? getVRM?.() : null;
         if (vrm) {
           parseAndApply(fullText, vrm);
         }
@@ -144,7 +167,7 @@ async function handleSend() {
     },
     onDone() {
       // Final expression parse
-      const vrm = getVRM();
+      const vrm = vrmAvailable ? getVRM?.() : null;
       if (vrm) {
         const cleaned = parseAndApply(fullText, vrm);
         contentSpan.textContent = cleaned;
@@ -213,7 +236,7 @@ function handleSaveSettings() {
   settings = getSettings();
 
   document.documentElement.style.setProperty('--bg', newBg);
-  setBackgroundColor(newBg);
+  if (setBackgroundColor) setBackgroundColor(newBg);
 
   settingsOverlay.classList.remove('open');
   setStatus('connected', 'Settings saved');
