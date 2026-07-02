@@ -85,8 +85,14 @@ export async function loadVRM(buffer, name = 'model') {
     const vrm = gltf.userData.vrm;
     if (!vrm) throw new Error('No VRM data in file. Is it a valid .vrm?');
 
-    VRMUtils.removeUnnecessaryVertices(gltf.scene);
-    VRMUtils.removeUnnecessaryJoints(gltf.scene);
+    // VRMUtils optimizations are optional — skip for VRM 0.x models
+    // that may not have standard spring-bone/joint layouts
+    try {
+      if (vrm.meta?.specVersion === '1.0') {
+        VRMUtils.removeUnnecessaryVertices(gltf.scene);
+        VRMUtils.removeUnnecessaryJoints(gltf.scene);
+      }
+    } catch { /* non-critical */ }
 
     scene.add(vrm.scene);
     currentVRM = vrm;
