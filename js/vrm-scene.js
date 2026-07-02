@@ -159,24 +159,32 @@ function updateIdle(delta, now) {
 }
 
 function applyBreathing(now) {
-  if (!currentVRM?.humanoid) return;
-  const cycle = 3.0; // seconds per breath cycle
-  const amplitude = 0.003;
+  if (!currentVRM) return;
+  const cycle = 3.5; // seconds per breath cycle
+  const amplitude = 0.008; // ~8mm, visible but subtle
   const offset = Math.sin((now * 0.001 * Math.PI * 2) / cycle) * amplitude;
 
+  // Try spine bone first, fall back to model root
+  let moved = false;
   try {
-    const spine = currentVRM.humanoid.getNormalizedBoneNode('spine');
-    if (spine) {
-      spine.position.y += offset;
+    const bones = ['spine', 'chest', 'upperChest'];
+    for (const name of bones) {
+      const bone = currentVRM.humanoid?.getNormalizedBoneNode?.(name);
+      if (bone) { bone.position.y += offset; moved = true; break; }
     }
-  } catch { /* model may not have a named spine bone */ }
+  } catch { /* bone access may fail */ }
+
+  // Fallback: oscillate entire model
+  if (!moved && currentVRM.scene) {
+    currentVRM.scene.position.y += offset * 5;
+  }
 }
 
 function applyBlink(now) {
   if (!currentVRM?.expressionManager) return;
 
-  const BLINK_CLOSE_MS = 80;
-  const BLINK_HOLD_MS = 20;
+  const BLINK_CLOSE_MS = 100;
+  const BLINK_HOLD_MS = 60;
 
   switch (blinkPhase) {
     case 'idle': {
@@ -220,7 +228,10 @@ function applyBlink(now) {
 }
 
 function setBlinkWeight(v) {
-  try { currentVRM.expressionManager.setValue('blink', v); } catch { /* blink not supported */ }
+  const names = ['blink', 'Blink', 'blinkL', 'blinkR'];
+  for (const name of names) {
+    try { currentVRM.expressionManager.setValue(name, v); return; } catch { /* try next */ }
+  }
 }
 
 function randomBlinkInterval() {
