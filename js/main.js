@@ -59,8 +59,8 @@ async function init() {
       initScene(canvas, settings.bgColor);
       window.addEventListener('resize', () => canvas.style.width = '');
     } else {
-      canvas.style.display = 'none';
-      document.getElementById('model-prompt')?.classList.add('hidden');
+      // VRM unavailable — show a friendly placeholder
+      modelPrompt.innerHTML = '<p>🎭 3D renderer unavailable</p><p style="font-size:0.8rem">Chat still works — set your endpoint in Settings (⚙️)</p>';
     }
 
     // Apply saved background
