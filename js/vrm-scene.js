@@ -4,59 +4,50 @@
  *   initScene(canvas)      → set up renderer
  *   loadVRM(buffer, name)  → load .vrm from ArrayBuffer
  *   getVRM()               → current VRM instance
- *   isVRM0x()              → true if loaded model is VRM 0.x
  *   dispose()              → clean up
  *
- * Supports VRM 0.x (Alicia Solid) and VRM 1.0.
+ * Supports VRM 0.x and 1.0.  Rest-pose approach adapted from AniCompanion.
  * Uses CDN imports: three.js + @pixiv/three-vrm
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm/lib/three-vrm.module.js';
+import {
+  VRMLoaderPlugin,
+  VRMUtils,
+  VRMHumanBoneName,
+  VRMExpressionPresetName,
+} from '@pixiv/three-vrm/lib/three-vrm.module.js';
 
 let renderer, scene, camera, clock;
 let currentVRM = null;
-let currentVRMVersion = '1.0'; // '0.0' | '1.0'
 let animationFrameId = null;
 
-/* Bone refs for idle animation (recorded once on load, set absolutely per frame) */
-let breathingBone = null;
-let breathingBoneOriginalY = 0;
-let breathingScene = null;
-let breathingSceneOriginalY = 0;
-
-/* Arm bones for idle pose (VRM 0.x only — arms start in T-pose) */
-let leftUpperArm = null;
-let rightUpperArm = null;
-let leftLowerArm = null;
-let rightLowerArm = null;
+/* Rest-pose rotations (applied once after load; vrm.update() won't reset them) */
+const restPoseRotations = {};
 
 /* Idle state */
+let idleStartTime = 0;
 let lastBlinkTime = 0;
 let nextBlinkInterval = randomBlinkInterval();
-let blinkPhase = 'idle'; // 'idle' | 'closing' | 'closed' | 'opening'
+let blinkPhase = 'idle';
 let blinkStart = 0;
 
 /* ── Init ─────────────────────────────────────────────── */
 
 export function initScene(canvas, bgColor = '#1a1a2e') {
-  // Renderer
   renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.2;
 
-  // Scene
   scene = new THREE.Scene();
   scene.background = new THREE.Color(bgColor);
 
-  // Camera — half-body framing
   camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
   camera.position.set(0, 1.2, 3.5);
   camera.lookAt(0, 1.0, 0);
 
-  // Lights
   scene.add(new THREE.AmbientLight(0xffffff, 2.0));
   const key = new THREE.DirectionalLight(0xffffff, 3.0);
   key.position.set(0, 2, 3);
@@ -68,8 +59,6 @@ export function initScene(canvas, bgColor = '#1a1a2e') {
   clock = new THREE.Clock();
   resize();
   window.addEventListener('resize', resize);
-
-  // start render loop (idle animation runs inside)
   animate();
 
   return { scene, camera, renderer };
@@ -77,12 +66,6 @@ export function initScene(canvas, bgColor = '#1a1a2e') {
 
 /* ── VRM Loading ──────────────────────────────────────── */
 
-/**
- * Load a VRM model from an ArrayBuffer.
- * @param {ArrayBuffer} buffer
- * @param {string} [name] — display name
- * @returns {Promise<import('@pixiv/three-vrm').VRM>}
- */
 export async function loadVRM(buffer, name = 'model') {
   disposeVRM();
 
@@ -99,11 +82,15 @@ export async function loadVRM(buffer, name = 'model') {
     const vrm = gltf.userData.vrm;
     if (!vrm) throw new Error('No VRM data in file. Is it a valid .vrm?');
 
-    // Detect VRM version
-    currentVRMVersion = vrm.meta?.specVersion || '0.0';
+    const specVersion = vrm.meta?.specVersion || '0.0';
 
-    // VRMUtils optimizations — safe for VRM 1.0, skip for VRM 0.x
-    if (currentVRMVersion === '1.0') {
+    // ── Critical: rotate VRM 0.x to standard orientation + set up bone mapping ──
+    if (specVersion === '0.0') {
+      VRMUtils.rotateVRM0(vrm);
+    }
+
+    // VRMUtils optimizations (safe for VRM 1.0)
+    if (specVersion === '1.0') {
       try {
         VRMUtils.removeUnnecessaryVertices(gltf.scene);
         VRMUtils.removeUnnecessaryJoints(gltf.scene);
@@ -113,47 +100,13 @@ export async function loadVRM(buffer, name = 'model') {
     scene.add(vrm.scene);
     currentVRM = vrm;
 
-    // ── Record bone refs for idle animations ──────────
+    // ── Apply rest pose: arms down from T-pose ──
+    applyRestPose(vrm, specVersion);
 
-    // Breathing: find spine/chest bone
-    breathingBone = null;
-    breathingScene = null;
-    leftUpperArm = null;
-    rightUpperArm = null;
-    leftLowerArm = null;
-    rightLowerArm = null;
-
-    if (currentVRMVersion === '1.0') {
-      // VRM 1.0: use getNormalizedBoneNode
-      for (const name of ['spine', 'chest', 'upperChest']) {
-        const bone = vrm.humanoid?.getNormalizedBoneNode?.(name);
-        if (bone) {
-          breathingBone = bone;
-          breathingBoneOriginalY = bone.position.y;
-          break;
-        }
-      }
-    } else {
-      // VRM 0.x: traverse skeleton by node name
-      setupVRM0xBones(vrm);
-    }
-
-    if (!breathingBone && vrm.scene) {
-      breathingScene = vrm.scene;
-      breathingSceneOriginalY = vrm.scene.position.y;
-    }
-
-    lastBlinkTime = performance.now();
+    idleStartTime = performance.now() / 1000;
+    lastBlinkTime = idleStartTime;
     nextBlinkInterval = randomBlinkInterval();
     blinkPhase = 'idle';
-
-    console.log('[vrm-scene] VRM loaded:', name, '| specVersion:', currentVRMVersion,
-      '| upper arms:', leftUpperArm?.name || 'by-pos', rightUpperArm?.name || 'by-pos',
-      '| hasExpression:', !!vrm.expressionManager || !!vrm.blendShapeProxy);
-
-    // Expose for console debugging
-    window.__vrm = vrm;
-    window.__bones = { leftUpperArm, rightUpperArm, leftLowerArm, rightLowerArm };
 
     return vrm;
   } catch (err) {
@@ -163,162 +116,37 @@ export async function loadVRM(buffer, name = 'model') {
 }
 
 /**
- * Find bones by name in the VRM 0.x skeleton via scene traversal.
- * VRM 0.x does not have getNormalizedBoneNode; we search the
- * armature for matching bone names.
+ * Apply A-pose from T-pose. Called once after load.
+ * Rotations are NOT reset by vrm.update() — they stick for the lifetime of the model.
  */
-function setupVRM0xBones(vrm) {
-  if (!vrm.scene) return;
+function applyRestPose(vrm, specVersion) {
+  if (specVersion !== '0.0') return;
 
-  // Collect all bone-like nodes for debug + position-based matching
-  const bones = [];
-  vrm.scene.traverse((node) => {
-    if (!node.isBone && !node.isObject3D) return;
-    if (!node.name) return;
-    bones.push(node);
+  const armAngle = 60.0 * Math.PI / 180.0;
+  const forearmAngle = 5.0 * Math.PI / 180.0;
 
-    const n = node.name;
-    const lower = n.toLowerCase();
+  const poses = [
+    [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), armAngle)],
+    [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -armAngle)],
+    [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), forearmAngle)],
+    [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -forearmAngle)],
+  ];
 
-    // Breathing target: spine / chest
-    if (!breathingBone) {
-      if (lower.includes('spine') || lower.includes('chest') || lower.includes('せなか') ||
-          lower.includes('上半身') || lower.includes('背骨') || lower.includes('脊椎')) {
-        breathingBone = node;
-        breathingBoneOriginalY = node.position.y;
-      }
+  for (const [boneName, quat] of poses) {
+    const node = vrm.humanoid?.getNormalizedBoneNode?.(boneName);
+    if (node) {
+      node.quaternion.copy(quat);
+      restPoseRotations[boneName] = quat.clone();
     }
-
-    // ── Arm detection: try name patterns, prefer non-Normalized bones ──
-    // Note: "shoulder" bones are clavicles, not upper arms. We want UpperArm.
-    const isUpperArm = (
-      (lower.includes('upperarm') || lower.includes('upper_arm') ||
-       (lower.includes('arm') && !lower.includes('lower') && !lower.includes('fore') && !lower.includes('normalized') && !lower.includes('shoulder')))
-      && !lower.includes('normalized')
-    );
-    const isLowerArm = (
-      (lower.includes('lowerarm') || lower.includes('lower_arm') || lower.includes('forearm') ||
-       lower.includes('前腕') || lower.includes('elbow')) && !lower.includes('normalized') && !lower.includes('twist')
-    );
-
-    const isLeft = lower.includes('left') || lower.includes('_l_') || lower.includes('左') || lower.includes('l_upper') || lower.includes('l_lower');
-    const isRight = lower.includes('right') || lower.includes('_r_') || lower.includes('右') || lower.includes('r_upper') || lower.includes('r_lower');
-
-    if (isUpperArm) {
-      if (isLeft) leftUpperArm = node;
-      else if (isRight) rightUpperArm = node;
-      // Don't set ambiguous upper arms here — let position fallback handle
-    }
-    if (isLowerArm) {
-      if (isLeft) leftLowerArm = node;
-      else if (isRight) rightLowerArm = node;
-    }
-  });
-
-  // ── Fallback: position-based detection (exclude Normalized_ bones) ──
-  const isRealBone = (bone) => bone.isBone && !bone.name.toLowerCase().includes('normalized');
-
-  if (!leftUpperArm || !rightUpperArm) {
-    let bestLeft = null, bestRight = null, bestLeftDist = Infinity, bestRightDist = Infinity;
-    for (const bone of bones) {
-      if (!isRealBone(bone)) continue;
-      const wp = new THREE.Vector3();
-      bone.getWorldPosition(wp);
-      // Upper arm: high Y, significant X, close to body center
-      if (wp.y > 0.7 && Math.abs(wp.x) > 0.05) {
-        const dist = Math.abs(wp.y - 1.0); // prefer shoulder height (~1.0)
-        if (wp.x > 0 && dist < bestLeftDist && wp.x < 0.5) {
-          bestLeftDist = dist; bestLeft = bone;
-        }
-        if (wp.x < 0 && dist < bestRightDist && wp.x > -0.5) {
-          bestRightDist = dist; bestRight = bone;
-        }
-      }
-    }
-    if (!leftUpperArm) leftUpperArm = bestLeft;
-    if (!rightUpperArm) rightUpperArm = bestRight;
   }
 
-  if (!leftLowerArm || !rightLowerArm) {
-    let bestLL = null, bestRL = null, bestLLDist = Infinity, bestRLDist = Infinity;
-    for (const bone of bones) {
-      if (!isRealBone(bone)) continue;
-      const wp = new THREE.Vector3();
-      bone.getWorldPosition(wp);
-      // Lower arm: further out on X than upper arm
-      if (wp.y > 0.5 && Math.abs(wp.x) > 0.2) {
-        const dist = Math.abs(Math.abs(wp.x) - 0.35); // prefer ~0.35 from center
-        if (wp.x > 0 && dist < bestLLDist && wp.x < 0.8) {
-          bestLLDist = dist; bestLL = bone;
-        }
-        if (wp.x < 0 && dist < bestRLDist && wp.x > -0.8) {
-          bestRLDist = dist; bestRL = bone;
-        }
-      }
-    }
-    if (!leftLowerArm) leftLowerArm = bestLL;
-    if (!rightLowerArm) rightLowerArm = bestRL;
-  }
-
-  // Debug: log found arm bones
-  console.log('[vrm-scene] Arm bones detected:', {
-    leftUpper: leftUpperArm?.name || 'NOT FOUND',
-    rightUpper: rightUpperArm?.name || 'NOT FOUND',
-    leftLower: leftLowerArm?.name || 'NOT FOUND',
-    rightLower: rightLowerArm?.name || 'NOT FOUND',
-    totalBones: bones.length,
-    sampleNames: bones.filter(b => b.isBone).slice(0, 15).map(b => b.name),
-  });
+  console.log('[vrm-scene] VRM loaded:', vrm.meta?.name || '?',
+    '| specVersion:', specVersion,
+    '| rest pose applied:', Object.keys(restPoseRotations).length > 0);
 }
 
-/**
- * Rotate arms from T-pose to natural resting pose.
- * Called every frame (after vrm.update) in the render loop.
- */
-function applyIdlePose() {
-  if (currentVRMVersion !== '0.0') return;
-  if (!leftUpperArm && !rightUpperArm && !leftLowerArm && !rightLowerArm) return;
-
-  // Axis-angle: rotate around Z axis (Biped arm joint rotation)
-  // Sign convention depends on model's local bone axes. Tune per-model.
-  const upperAngle = 0.9;   // +52° — arm down from T-pose
-  const lowerAngle = 0.35;  // +20° — slight elbow bend
-
-  if (leftUpperArm) {
-    leftUpperArm.quaternion.setFromAxisAngle(
-      new THREE.Vector3(0, 0, 1), -upperAngle
-    );
-  }
-  if (rightUpperArm) {
-    rightUpperArm.quaternion.setFromAxisAngle(
-      new THREE.Vector3(0, 0, 1), upperAngle
-    );
-  }
-  if (leftLowerArm) {
-    leftLowerArm.quaternion.setFromAxisAngle(
-      new THREE.Vector3(0, 0, 1), -lowerAngle
-    );
-  }
-  if (rightLowerArm) {
-    rightLowerArm.quaternion.setFromAxisAngle(
-      new THREE.Vector3(0, 0, 1), lowerAngle
-    );
-  }
-}
-
-/** Get the current VRM instance (or null). */
 export function getVRM() {
   return currentVRM;
-}
-
-/** Returns true if the loaded model is VRM 0.x. */
-export function isVRM0x() {
-  return currentVRMVersion === '0.0';
-}
-
-/** Returns the detected VRM specVersion string ('0.0' | '1.0'). */
-export function getVRMVersion() {
-  return currentVRMVersion;
 }
 
 /* ── Dispose ──────────────────────────────────────────── */
@@ -337,9 +165,6 @@ function disposeVRM() {
       }
     });
     currentVRM = null;
-    breathingBone = null;
-    breathingScene = null;
-    leftUpperArm = rightUpperArm = leftLowerArm = rightLowerArm = null;
   }
 }
 
@@ -355,14 +180,12 @@ export function dispose() {
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
 
-  const delta = Math.min(clock.getDelta(), 0.1); // cap to avoid spiral
-  const now = performance.now();
+  const delta = Math.min(clock.getDelta(), 0.1);
+  const now = performance.now() / 1000;
 
   if (currentVRM) {
     updateIdle(delta, now);
-    try { currentVRM.update(delta); } catch { /* spring bone may fail silently */ }
-    // Apply idle pose AFTER vrm.update() — it may reset bone transforms
-    if (currentVRMVersion === '0.0') applyIdlePose();
+    currentVRM.update(delta);
   }
 
   renderer.render(scene, camera);
@@ -371,131 +194,79 @@ function animate() {
 /* ── Idle Animations ──────────────────────────────────── */
 
 function updateIdle(delta, now) {
-  applyBreathing(now);
+  if (!currentVRM) return;
+
+  // Breathing — subtle spine rotation
+  const breathPeriod = 3.5;
+  const breathPhase = ((now - idleStartTime) / breathPeriod) * 2.0 * Math.PI;
+  const breathValue = (Math.sin(breathPhase) + 1.0) / 2.0;
+  const spineNode = currentVRM.humanoid?.getNormalizedBoneNode?.(VRMHumanBoneName.Spine);
+  if (spineNode) {
+    spineNode.quaternion.setFromAxisAngle(
+      new THREE.Vector3(1, 0, 0), breathValue * 0.012
+    );
+  }
+
+  // Head sway
+  const swayX = Math.sin((now - idleStartTime) / 8.0 * 2.0 * Math.PI) * 0.03;
+  const swayY = Math.cos((now - idleStartTime) / 10.0 * 2.0 * Math.PI) * 0.02;
+  const headNode = currentVRM.humanoid?.getNormalizedBoneNode?.(VRMHumanBoneName.Head);
+  if (headNode) {
+    const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), swayX);
+    const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), swayY);
+    headNode.quaternion.multiplyQuaternions(qx, qy);
+  }
+
+  // Blink
   applyBlink(now);
 }
 
-function applyBreathing(now) {
-  if (!currentVRM) return;
-  const cycle = 3.5;
-  const amplitude = 0.008;
-  const offset = Math.sin((now * 0.001 * Math.PI * 2) / cycle) * amplitude;
-
-  if (breathingBone) {
-    breathingBone.position.y = breathingBoneOriginalY + offset;
-  } else if (breathingScene) {
-    breathingScene.position.y = breathingSceneOriginalY + offset * 5;
-  }
-}
-
 function applyBlink(now) {
-  const BLINK_CLOSE_MS = 100;
-  const BLINK_HOLD_MS = 60;
+  if (!currentVRM?.expressionManager) return;
 
-  switch (blinkPhase) {
-    case 'idle': {
-      if (now - lastBlinkTime > nextBlinkInterval) {
-        blinkPhase = 'closing';
-        blinkStart = now;
-      }
-      break;
+  const BLINK_DURATION = 0.15;
+
+  if (blinkPhase === 'idle') {
+    if (now - lastBlinkTime > nextBlinkInterval) {
+      blinkPhase = 'closing';
+      blinkStart = now;
     }
-    case 'closing': {
-      const t = (now - blinkStart) / BLINK_CLOSE_MS;
-      if (t >= 1) {
-        setBlinkWeight(1);
-        blinkPhase = 'closed';
-        blinkStart = now;
-      } else {
-        setBlinkWeight(t);
-      }
-      break;
-    }
-    case 'closed': {
-      if (now - blinkStart > BLINK_HOLD_MS) {
-        blinkPhase = 'opening';
-        blinkStart = now;
-      }
-      break;
-    }
-    case 'opening': {
-      const t = (now - blinkStart) / BLINK_CLOSE_MS;
-      if (t >= 1) {
-        setBlinkWeight(0);
-        blinkPhase = 'idle';
-        lastBlinkTime = now;
-        nextBlinkInterval = randomBlinkInterval();
-      } else {
-        setBlinkWeight(1 - t);
-      }
-      break;
+  } else {
+    const elapsed = now - blinkStart;
+    if (elapsed >= BLINK_DURATION) {
+      currentVRM.expressionManager.setValue(VRMExpressionPresetName.Blink, 0);
+      blinkPhase = 'idle';
+      lastBlinkTime = now;
+      nextBlinkInterval = randomBlinkInterval();
+    } else {
+      const half = BLINK_DURATION / 2;
+      const w = elapsed < half ? elapsed / half : 1.0 - (elapsed - half) / half;
+      currentVRM.expressionManager.setValue(VRMExpressionPresetName.Blink, w);
     }
   }
-}
-
-function setBlinkWeight(v) {
-  if (!currentVRM) return;
-
-  // VRM 1.0: expressionManager
-  if (currentVRMVersion === '1.0' && currentVRM.expressionManager) {
-    const names = ['blink', 'Blink', 'blinkL', 'blinkR'];
-    for (const name of names) {
-      try { currentVRM.expressionManager.setValue(name, v); return; } catch { /* try next */ }
-    }
-    return;
-  }
-
-  // VRM 0.x: blendShapeProxy
-  if (currentVRMVersion === '0.0' && currentVRM.blendShapeProxy) {
-    const names = ['Blink', 'blink', 'BLINK', 'blink_L', 'Blink_L', 'blink_R', 'Blink_R'];
-    for (const name of names) {
-      try { currentVRM.blendShapeProxy.setValue(name, v); return; } catch { /* try next */ }
-    }
-  }
-}
-
-/** Blend shape API used by expression.js — set a named expression weight. */
-export function setExpressionValue(vrm, key, value) {
-  if (!vrm) return;
-  if (vrm.expressionManager) {
-    vrm.expressionManager.setValue(key, value);
-  } else if (vrm.blendShapeProxy) {
-    vrm.blendShapeProxy.setValue(key, value);
-  }
-}
-
-/** Blend shape API used by expression.js — get current weight. */
-export function getExpressionValue(vrm, key) {
-  if (!vrm) return 0;
-  if (vrm.expressionManager) {
-    return vrm.expressionManager.getValue(key) ?? 0;
-  }
-  if (vrm.blendShapeProxy) {
-    return vrm.blendShapeProxy.getValue(key) ?? 0;
-  }
-  return 0;
-}
-
-/** Get all blend shape / expression names. */
-export function getExpressionNames(vrm) {
-  if (!vrm) return [];
-  if (vrm.expressionManager?.getExpressionNames) {
-    return vrm.expressionManager.getExpressionNames();
-  }
-  if (vrm.blendShapeProxy?.getExpressions) {
-    return vrm.blendShapeProxy.getExpressions().map(e => typeof e === 'string' ? e : e.name);
-  }
-  return [];
-}
-
-/** Check if the VRM has any expression/blend-shape system. */
-export function hasExpressions(vrm) {
-  if (!vrm) return false;
-  return !!(vrm.expressionManager || vrm.blendShapeProxy);
 }
 
 function randomBlinkInterval() {
-  return 3000 + Math.random() * 4000; // 3–7 seconds
+  return 3.0 + Math.random() * 2.0; // 3–5 seconds
+}
+
+/* ── Expression helpers for expression.js ─────────────── */
+
+export function setExpressionValue(vrm, key, value) {
+  if (!vrm?.expressionManager) return;
+  vrm.expressionManager.setValue(key, value);
+}
+
+export function getExpressionValue(vrm, key) {
+  return vrm?.expressionManager?.getValue(key) ?? 0;
+}
+
+export function getExpressionNames(vrm) {
+  return vrm?.expressionManager?.getExpressionNames?.() ?? [];
+}
+
+export function hasExpressions(vrm) {
+  return !!vrm?.expressionManager;
 }
 
 /* ── Helpers ──────────────────────────────────────────── */
@@ -514,7 +285,6 @@ function resize() {
   }
 }
 
-/** Update scene background color. */
 export function setBackgroundColor(color) {
   if (scene) scene.background = new THREE.Color(color);
 }
