@@ -4,8 +4,10 @@
  *   initScene(canvas)      → set up renderer
  *   loadVRM(buffer, name)  → load .vrm from ArrayBuffer
  *   getVRM()               → current VRM instance
+ *   isVRM0x()              → true if loaded model is VRM 0.x
  *   dispose()              → clean up
  *
+ * Supports VRM 0.x (Alicia Solid) and VRM 1.0.
  * Uses CDN imports: three.js + @pixiv/three-vrm
  */
 import * as THREE from 'three';
@@ -14,6 +16,7 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm/lib/three-vrm.module
 
 let renderer, scene, camera, clock;
 let currentVRM = null;
+let currentVRMVersion = '1.0'; // '0.0' | '1.0'
 let animationFrameId = null;
 
 /* Bone refs for idle animation (recorded once on load, set absolutely per frame) */
@@ -21,6 +24,12 @@ let breathingBone = null;
 let breathingBoneOriginalY = 0;
 let breathingScene = null;
 let breathingSceneOriginalY = 0;
+
+/* Arm bones for idle pose (VRM 0.x only — arms start in T-pose) */
+let leftUpperArm = null;
+let rightUpperArm = null;
+let leftLowerArm = null;
+let rightLowerArm = null;
 
 /* Idle state */
 let lastBlinkTime = 0;
@@ -75,7 +84,6 @@ export function initScene(canvas, bgColor = '#1a1a2e') {
  * @returns {Promise<import('@pixiv/three-vrm').VRM>}
  */
 export async function loadVRM(buffer, name = 'model') {
-  // Dispose previous
   disposeVRM();
 
   const loader = new GLTFLoader();
@@ -91,22 +99,32 @@ export async function loadVRM(buffer, name = 'model') {
     const vrm = gltf.userData.vrm;
     if (!vrm) throw new Error('No VRM data in file. Is it a valid .vrm?');
 
-    // VRMUtils optimizations are optional — skip for VRM 0.x models
-    // that may not have standard spring-bone/joint layouts
-    try {
-      if (vrm.meta?.specVersion === '1.0') {
+    // Detect VRM version
+    currentVRMVersion = vrm.meta?.specVersion || '0.0';
+
+    // VRMUtils optimizations — safe for VRM 1.0, skip for VRM 0.x
+    if (currentVRMVersion === '1.0') {
+      try {
         VRMUtils.removeUnnecessaryVertices(gltf.scene);
         VRMUtils.removeUnnecessaryJoints(gltf.scene);
-      }
-    } catch { /* non-critical */ }
+      } catch { /* non-critical */ }
+    }
 
     scene.add(vrm.scene);
     currentVRM = vrm;
 
-    // Record bone refs for idle animation (absolute positioning, not cumulative)
+    // ── Record bone refs for idle animations ──────────
+
+    // Breathing: find spine/chest bone
     breathingBone = null;
     breathingScene = null;
-    try {
+    leftUpperArm = null;
+    rightUpperArm = null;
+    leftLowerArm = null;
+    rightLowerArm = null;
+
+    if (currentVRMVersion === '1.0') {
+      // VRM 1.0: use getNormalizedBoneNode
       for (const name of ['spine', 'chest', 'upperChest']) {
         const bone = vrm.humanoid?.getNormalizedBoneNode?.(name);
         if (bone) {
@@ -115,10 +133,19 @@ export async function loadVRM(buffer, name = 'model') {
           break;
         }
       }
-    } catch { /* bone access may fail */ }
+    } else {
+      // VRM 0.x: traverse skeleton by node name
+      setupVRM0xBones(vrm);
+    }
+
     if (!breathingBone && vrm.scene) {
       breathingScene = vrm.scene;
       breathingSceneOriginalY = vrm.scene.position.y;
+    }
+
+    // ── Apply idle pose (VRM 0.x starts in T-pose) ──
+    if (currentVRMVersion === '0.0') {
+      applyIdlePose();
     }
 
     lastBlinkTime = performance.now();
@@ -132,9 +159,87 @@ export async function loadVRM(buffer, name = 'model') {
   }
 }
 
+/**
+ * Find bones by name in the VRM 0.x skeleton via scene traversal.
+ * VRM 0.x does not have getNormalizedBoneNode; we search the
+ * armature for matching bone names.
+ */
+function setupVRM0xBones(vrm) {
+  if (!vrm.scene) return;
+
+  vrm.scene.traverse((node) => {
+    if (!node.isBone && !node.isObject3D) return;
+    const n = node.name;
+
+    // Breathing target: spine / chest
+    if (!breathingBone) {
+      const lower = n.toLowerCase();
+      if (lower.includes('spine') || lower.includes('chest') || lower.includes('上半身')) {
+        breathingBone = node;
+        breathingBoneOriginalY = node.position.y;
+      }
+    }
+
+    // Arm bones for idle pose
+    const lowerN = n.toLowerCase();
+    if (lowerN.includes('upperarm') || lowerN.includes('upper_arm') || lowerN.includes('肩')) {
+      if (lowerN.includes('left') || lowerN.includes('l_')) {
+        leftUpperArm = node;
+      } else if (lowerN.includes('right') || lowerN.includes('r_')) {
+        rightUpperArm = node;
+      } else {
+        // fallback: check position.x sign
+        if (!leftUpperArm) leftUpperArm = node;
+      }
+    }
+    if (lowerN.includes('lowerarm') || lowerN.includes('lower_arm') || lowerN.includes('forearm') || lowerN.includes('ひじ')) {
+      if (lowerN.includes('left') || lowerN.includes('l_')) {
+        leftLowerArm = node;
+      } else if (lowerN.includes('right') || lowerN.includes('r_')) {
+        rightLowerArm = node;
+      }
+    }
+  });
+}
+
+/**
+ * Rotate arms from T-pose to natural resting pose.
+ * Only needed for VRM 0.x models without built-in animations.
+ */
+function applyIdlePose() {
+  // Rotate upper arms down ~60° from horizontal (T-pose arms = 90° from body)
+  const upperArmAngle = THREE.MathUtils.degToRad(-55);
+  const lowerArmAngle = THREE.MathUtils.degToRad(-15);
+
+  if (leftUpperArm) {
+    leftUpperArm.rotation.z = -upperArmAngle;
+    leftUpperArm.rotation.x = THREE.MathUtils.degToRad(-10);
+  }
+  if (rightUpperArm) {
+    rightUpperArm.rotation.z = upperArmAngle;
+    rightUpperArm.rotation.x = THREE.MathUtils.degToRad(-10);
+  }
+  if (leftLowerArm) {
+    leftLowerArm.rotation.z = lowerArmAngle;
+  }
+  if (rightLowerArm) {
+    rightLowerArm.rotation.z = -lowerArmAngle;
+  }
+}
+
 /** Get the current VRM instance (or null). */
 export function getVRM() {
   return currentVRM;
+}
+
+/** Returns true if the loaded model is VRM 0.x. */
+export function isVRM0x() {
+  return currentVRMVersion === '0.0';
+}
+
+/** Returns the detected VRM specVersion string ('0.0' | '1.0'). */
+export function getVRMVersion() {
+  return currentVRMVersion;
 }
 
 /* ── Dispose ──────────────────────────────────────────── */
@@ -153,6 +258,9 @@ function disposeVRM() {
       }
     });
     currentVRM = null;
+    breathingBone = null;
+    breathingScene = null;
+    leftUpperArm = rightUpperArm = leftLowerArm = rightLowerArm = null;
   }
 }
 
@@ -173,7 +281,7 @@ function animate() {
 
   if (currentVRM) {
     updateIdle(delta, now);
-    currentVRM.update(delta);
+    try { currentVRM.update(delta); } catch { /* spring bone may fail silently */ }
   }
 
   renderer.render(scene, camera);
@@ -182,20 +290,16 @@ function animate() {
 /* ── Idle Animations ──────────────────────────────────── */
 
 function updateIdle(delta, now) {
-  // Breathing — subtle Y oscillation via humanoid bone
   applyBreathing(now);
-
-  // Blinking
   applyBlink(now);
 }
 
 function applyBreathing(now) {
   if (!currentVRM) return;
-  const cycle = 3.5; // seconds per breath cycle
-  const amplitude = 0.008; // ~8mm, visible but subtle
+  const cycle = 3.5;
+  const amplitude = 0.008;
   const offset = Math.sin((now * 0.001 * Math.PI * 2) / cycle) * amplitude;
 
-  // Use recorded bone refs — set absolute position, not cumulative
   if (breathingBone) {
     breathingBone.position.y = breathingBoneOriginalY + offset;
   } else if (breathingScene) {
@@ -204,8 +308,6 @@ function applyBreathing(now) {
 }
 
 function applyBlink(now) {
-  if (!currentVRM?.expressionManager) return;
-
   const BLINK_CLOSE_MS = 100;
   const BLINK_HOLD_MS = 60;
 
@@ -251,10 +353,64 @@ function applyBlink(now) {
 }
 
 function setBlinkWeight(v) {
-  const names = ['blink', 'Blink', 'blinkL', 'blinkR'];
-  for (const name of names) {
-    try { currentVRM.expressionManager.setValue(name, v); return; } catch { /* try next */ }
+  if (!currentVRM) return;
+
+  // VRM 1.0: expressionManager
+  if (currentVRMVersion === '1.0' && currentVRM.expressionManager) {
+    const names = ['blink', 'Blink', 'blinkL', 'blinkR'];
+    for (const name of names) {
+      try { currentVRM.expressionManager.setValue(name, v); return; } catch { /* try next */ }
+    }
+    return;
   }
+
+  // VRM 0.x: blendShapeProxy
+  if (currentVRMVersion === '0.0' && currentVRM.blendShapeProxy) {
+    const names = ['Blink', 'blink', 'BLINK', 'blink_L', 'Blink_L', 'blink_R', 'Blink_R'];
+    for (const name of names) {
+      try { currentVRM.blendShapeProxy.setValue(name, v); return; } catch { /* try next */ }
+    }
+  }
+}
+
+/** Blend shape API used by expression.js — set a named expression weight. */
+export function setExpressionValue(vrm, key, value) {
+  if (!vrm) return;
+  if (vrm.expressionManager) {
+    vrm.expressionManager.setValue(key, value);
+  } else if (vrm.blendShapeProxy) {
+    vrm.blendShapeProxy.setValue(key, value);
+  }
+}
+
+/** Blend shape API used by expression.js — get current weight. */
+export function getExpressionValue(vrm, key) {
+  if (!vrm) return 0;
+  if (vrm.expressionManager) {
+    return vrm.expressionManager.getValue(key) ?? 0;
+  }
+  if (vrm.blendShapeProxy) {
+    return vrm.blendShapeProxy.getValue(key) ?? 0;
+  }
+  return 0;
+}
+
+/** Get all blend shape / expression names. */
+export function getExpressionNames(vrm) {
+  if (!vrm) return [];
+  if (vrm.expressionManager?.getExpressionNames) {
+    return vrm.expressionManager.getExpressionNames();
+  }
+  if (vrm.blendShapeProxy?.getExpressions) {
+    return vrm.blendShapeProxy.getExpressions().map(e => typeof e === 'string' ? e : e.name);
+  }
+  return [];
+}
+
+/** Check if the VRM has any expression/blend-shape system. */
+export function hasExpressions(vrm) {
+  if (!vrm) return false;
+  return !!(vrm.expressionManager || vrm.blendShapeProxy);
 }
 
 function randomBlinkInterval() {

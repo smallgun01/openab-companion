@@ -4,76 +4,139 @@
  *   parseAndApply(text, vrm) → returns cleaned text (tags stripped)
  *
  * Supports 9 MVP emotions with lerp transitions over 300ms.
+ * Handles both VRM 0.x (blendShapeProxy) and VRM 1.0 (expressionManager).
  */
+import {
+  setExpressionValue,
+  getExpressionValue,
+  getExpressionNames,
+  hasExpressions,
+  isVRM0x,
+} from './vrm-scene.js';
 
-/* Tag → VRM expression preset + weights */
-const EMOTION_MAP = {
-  happy:      { preset: 'happy',      weights: { happy: 1.0 } },
-  sad:        { preset: 'sad',        weights: { sad: 1.0 } },
-  angry:      { preset: 'angry',      weights: { angry: 1.0 } },
-  surprised:  { preset: 'surprised',  weights: { surprised: 1.0 } },
-  relaxed:    { preset: 'relaxed',    weights: { relaxed: 1.0 } },
-  thinking:   { preset: 'neutral',    weights: { neutral: 1.0 } },
-  confused:   { preset: 'sad',        weights: { sad: 0.3, surprised: 0.3 } },
-  excited:    { preset: 'happy',      weights: { happy: 1.0, surprised: 0.5 } },
-  neutral:    { preset: 'neutral',    weights: { neutral: 1.0 } },
+/* ── Emotion → VRM preset mapping ─────────────────────── */
+
+/**
+ * VRM 1.0 preset names.
+ */
+const VRM1_PRESETS = {
+  happy:      'happy',
+  sad:        'sad',
+  angry:      'angry',
+  surprised:  'surprised',
+  relaxed:    'relaxed',
+  neutral:    'neutral',
+  thinking:   'neutral',
+  confused:   'sad',
+  excited:    'happy',
+};
+
+/**
+ * VRM 0.x blend-shape preset names.
+ * Alicia Solid / standard VRM 0.x presets: joy, sorrow, angry, fun, neutral
+ */
+const VRM0_PRESETS = {
+  happy:      'joy',
+  sad:        'sorrow',
+  angry:      'angry',
+  surprised:  'fun',
+  relaxed:    'neutral',
+  neutral:    'neutral',
+  thinking:   'neutral',
+  confused:   'sorrow',
+  excited:    'joy',
+};
+
+/**
+ * Weights per emotion tag.  Keys are our internal emotion names.
+ * Weights are always in VRM 1.0 preset names; they get remapped at apply-time.
+ */
+const EMOTION_WEIGHTS = {
+  happy:      { happy: 1.0 },
+  sad:        { sad: 1.0 },
+  angry:      { angry: 1.0 },
+  surprised:  { surprised: 1.0 },
+  relaxed:    { relaxed: 1.0 },
+  thinking:   { neutral: 1.0 },
+  confused:   { sad: 0.3, surprised: 0.3 },
+  excited:    { happy: 1.0, surprised: 0.5 },
+  neutral:    { neutral: 1.0 },
 };
 
 const TAG_RE = /\[([a-zA-Z]+)\]/g;
 
-/** Currently active expression for lerp tracking. null = not yet set. */
+/** Currently active expression for lerp tracking. */
 let currentExpression = null;
 /** Animation frame ID for lerp, so we can cancel on new expression. */
 let lerpRAF = null;
 /** Start time of current lerp. */
 let lerpStart = 0;
-/** Starting weights snapshot. */
+/** Starting weights snapshot (in resolved VRM preset keys). */
 let lerpFrom = {};
-/** Target weights. */
+/** Target weights (in resolved VRM preset keys). */
 let lerpTo = {};
 /** Duration in ms. */
 const LERP_MS = 300;
 
+/* ── Public API ───────────────────────────────────────── */
+
 /**
  * Scan text for [tag], strip tags, and apply the last found emotion to the VRM.
- * Tags in the middle of text apply progressively; the last tag wins.
  *
  * @param {string} text - Assistant message text
  * @param {import('@pixiv/three-vrm').VRM} vrm - VRM instance
  * @returns {string} Cleaned text with all [tag] removed
  */
 export function parseAndApply(text, vrm) {
-  if (!text) return text;
+  if (!text || !hasExpressions(vrm)) return text;
 
   const tags = [];
   const cleaned = text.replace(TAG_RE, (match, tag) => {
     const lower = tag.toLowerCase();
-    if (EMOTION_MAP[lower]) {
+    if (EMOTION_WEIGHTS[lower]) {
       tags.push(lower);
-      return ''; // strip tag
+      return '';
     }
-    // unknown tag → fallback neutral
     tags.push('neutral');
     return '';
   }).replace(/\s{2,}/g, ' ').trim();
 
-  // apply the last tag found (or neutral if none)
   const emotionKey = tags.length > 0 ? tags[tags.length - 1] : 'neutral';
-  const mapping = EMOTION_MAP[emotionKey] || EMOTION_MAP.neutral;
-
-  applyWeights(vrm, mapping.weights);
+  applyWeightsResolved(vrm, emotionKey);
   return cleaned;
 }
 
-/** Apply expression weights to VRM with lerp transition. */
-function applyWeights(vrm, targetWeights) {
-  if (!vrm || !vrm.expressionManager) return;
+/* ── Internal: remap & apply ──────────────────────────── */
 
-  // Cancel any in-progress lerp
+/**
+ * Resolve internal emotion keys → concrete VRM preset names,
+ * depending on VRM version (0.x vs 1.0).
+ */
+function resolvePresetMap() {
+  return isVRM0x() ? VRM0_PRESETS : VRM1_PRESETS;
+}
+
+/**
+ * Remap internal weight map keys to the current VRM version's preset names.
+ * e.g. `{ happy: 1.0, surprised: 0.5 }` → `{ joy: 1.0, fun: 0.5 }` for VRM 0.x
+ */
+function remapWeights(weights) {
+  const presets = resolvePresetMap();
+  const out = {};
+  for (const [key, value] of Object.entries(weights)) {
+    const preset = presets[key] || presets.neutral;
+    out[preset] = (out[preset] || 0) + value;
+  }
+  return out;
+}
+
+function applyWeightsResolved(vrm, emotionKey) {
+  const rawWeights = EMOTION_WEIGHTS[emotionKey] || EMOTION_WEIGHTS.neutral;
+  const targetWeights = remapWeights(rawWeights);
+
   if (lerpRAF) cancelAnimationFrame(lerpRAF);
 
   lerpFrom = snapshotWeights(vrm, targetWeights);
-  // Reset keys present in lerpFrom but absent in target → lerp to 0
   lerpTo = { ...targetWeights };
   for (const key of Object.keys(lerpFrom)) {
     if (!(key in lerpTo)) lerpTo[key] = 0;
@@ -83,43 +146,32 @@ function applyWeights(vrm, targetWeights) {
   tickLerp(vrm);
 }
 
-/** Take a snapshot of current expression weights for lerp start. */
 function snapshotWeights(vrm, target) {
   const snap = {};
   for (const key of Object.keys(target)) {
-    try {
-      snap[key] = vrm.expressionManager.getValue(key) ?? 0;
-    } catch {
-      snap[key] = 0;
-    }
+    snap[key] = getExpressionValue(vrm, key);
   }
-  // Also capture keys we may need to reset that aren't in target
-  const allKeys = vrm.expressionManager.getExpressionNames?.() ?? [];
+  const allKeys = getExpressionNames(vrm);
   for (const key of allKeys) {
     if (!(key in snap)) {
-      snap[key] = vrm.expressionManager.getValue(key) ?? 0;
+      snap[key] = getExpressionValue(vrm, key);
     }
   }
   return snap;
 }
 
-/** One frame of the lerp. */
 function tickLerp(vrm) {
-  if (!vrm || !vrm.expressionManager) return;
+  if (!hasExpressions(vrm)) return;
 
   const elapsed = performance.now() - lerpStart;
   const t = Math.min(elapsed / LERP_MS, 1.0);
-  // ease-out
   const eased = 1 - Math.pow(1 - t, 3);
 
-  // Set expression weights for target keys
   for (const key of Object.keys(lerpTo)) {
     const from = lerpFrom[key] ?? 0;
     const to = lerpTo[key];
     const val = from + (to - from) * eased;
-    try {
-      vrm.expressionManager.setValue(key, val);
-    } catch { /* ignore unsupported expression keys */ }
+    setExpressionValue(vrm, key, val);
   }
 
   if (t < 1) {
@@ -129,4 +181,4 @@ function tickLerp(vrm) {
   }
 }
 
-export { EMOTION_MAP };
+export { EMOTION_WEIGHTS as EMOTION_MAP };
