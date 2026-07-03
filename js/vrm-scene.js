@@ -143,14 +143,13 @@ export async function loadVRM(buffer, name = 'model') {
       breathingSceneOriginalY = vrm.scene.position.y;
     }
 
-    // ── Apply idle pose (VRM 0.x starts in T-pose) ──
-    if (currentVRMVersion === '0.0') {
-      applyIdlePose();
-    }
-
     lastBlinkTime = performance.now();
     nextBlinkInterval = randomBlinkInterval();
     blinkPhase = 'idle';
+
+    console.log('[vrm-scene] VRM loaded:', name, '| specVersion:', currentVRMVersion,
+      '| upper arms:', leftUpperArm?.name || 'by-pos', rightUpperArm?.name || 'by-pos',
+      '| hasExpression:', !!vrm.expressionManager || !!vrm.blendShapeProxy);
 
     return vrm;
   } catch (err) {
@@ -187,13 +186,15 @@ function setupVRM0xBones(vrm) {
     }
 
     // ── Arm detection: try name patterns, prefer non-Normalized bones ──
+    // Note: "shoulder" bones are clavicles, not upper arms. We want UpperArm.
     const isUpperArm = (
-      (lower.includes('upperarm') || lower.includes('upper_arm') || lower.includes('肩') ||
-       lower.includes('shoulder')) && !lower.includes('normalized')
+      (lower.includes('upperarm') || lower.includes('upper_arm') ||
+       (lower.includes('arm') && !lower.includes('lower') && !lower.includes('fore') && !lower.includes('normalized') && !lower.includes('shoulder')))
+      && !lower.includes('normalized')
     );
     const isLowerArm = (
       (lower.includes('lowerarm') || lower.includes('lower_arm') || lower.includes('forearm') ||
-       lower.includes('前腕') || lower.includes('elbow')) && !lower.includes('normalized')
+       lower.includes('前腕') || lower.includes('elbow')) && !lower.includes('normalized') && !lower.includes('twist')
     );
 
     const isLeft = lower.includes('left') || lower.includes('_l_') || lower.includes('左') || lower.includes('l_upper') || lower.includes('l_lower');
@@ -268,57 +269,36 @@ function setupVRM0xBones(vrm) {
 
 /**
  * Rotate arms from T-pose to natural resting pose.
- * Called every frame in case vrm.update() resets transforms.
- * Only for VRM 0.x models without built-in animations.
+ * Called every frame (after vrm.update) in the render loop.
  */
-let idlePoseApplied = false;
 function applyIdlePose() {
-  if (idlePoseApplied) return; // apply once on load
+  if (currentVRMVersion !== '0.0') return;
+  if (!leftUpperArm && !rightUpperArm && !leftLowerArm && !rightLowerArm) return;
 
-  // For Biped skeletons, the shoulder rotation axis varies.
-  // Try the most common axes for VRM 0.x models.
-  const upperDeg = -50;  // rotate upper arm down
-  const lowerDeg = -20;  // slight elbow bend
+  // Axis-angle: rotate around Z axis (Biped arm joint rotation)
+  const upperAngle = -0.9;  // ~-52° — arm down from horizontal
+  const lowerAngle = -0.35; // ~-20° — slight elbow bend
 
-  const upperRad = THREE.MathUtils.degToRad(upperDeg);
-  const lowerRad = THREE.MathUtils.degToRad(lowerDeg);
-
-  // Try setting rotation on X (most common for side-to-body rotation in Biped)
   if (leftUpperArm) {
-    leftUpperArm.rotation.x = upperRad;
-    leftUpperArm.rotation.order = 'YXZ';
+    leftUpperArm.quaternion.setFromAxisAngle(
+      new THREE.Vector3(0, 0, 1), upperAngle
+    );
   }
   if (rightUpperArm) {
-    rightUpperArm.rotation.x = upperRad;
-    rightUpperArm.rotation.order = 'YXZ';
+    rightUpperArm.quaternion.setFromAxisAngle(
+      new THREE.Vector3(0, 0, -1), upperAngle
+    );
   }
   if (leftLowerArm) {
-    leftLowerArm.rotation.x = lowerRad;
-    leftLowerArm.rotation.order = 'YXZ';
+    leftLowerArm.quaternion.setFromAxisAngle(
+      new THREE.Vector3(0, 0, 1), lowerAngle
+    );
   }
   if (rightLowerArm) {
-    rightLowerArm.rotation.x = lowerRad;
-    rightLowerArm.rotation.order = 'YXZ';
+    rightLowerArm.quaternion.setFromAxisAngle(
+      new THREE.Vector3(0, 0, -1), lowerAngle
+    );
   }
-
-  // Also apply to arm IK targets if they exist (some models use IK)
-  if (currentVRM?.scene) {
-    currentVRM.scene.traverse((node) => {
-      const nl = node.name.toLowerCase();
-      if (nl.includes('arm_ik') || nl.includes('armik') || nl.includes('hand_ik')) {
-        if (nl.includes('left') || nl.includes('_l_')) {
-          node.position.y -= 0.3;
-        } else if (nl.includes('right') || nl.includes('_r_')) {
-          node.position.y -= 0.3;
-        }
-      }
-    });
-  }
-
-  idlePoseApplied = true;
-  console.log('[vrm-scene] Idle pose applied. Upper arms:',
-    leftUpperArm?.name, rightUpperArm?.name,
-    '| rotationX:', leftUpperArm?.rotation.x, rightUpperArm?.rotation.x);
 }
 
 /** Get the current VRM instance (or null). */
@@ -376,6 +356,8 @@ function animate() {
   if (currentVRM) {
     updateIdle(delta, now);
     try { currentVRM.update(delta); } catch { /* spring bone may fail silently */ }
+    // Apply idle pose AFTER vrm.update() — it may reset bone transforms
+    if (currentVRMVersion === '0.0') applyIdlePose();
   }
 
   renderer.render(scene, camera);
