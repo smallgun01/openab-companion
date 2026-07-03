@@ -143,6 +143,9 @@ function applyRestPose(vrm, specVersion) {
   console.log('[vrm-scene] VRM loaded:', vrm.meta?.name || '?',
     '| specVersion:', specVersion,
     '| rest pose applied:', Object.keys(restPoseRotations).length > 0);
+
+  // Debug: expose for console testing
+  window.__vrm = vrm;
 }
 
 export function getVRM() {
