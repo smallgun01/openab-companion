@@ -73,7 +73,11 @@ function applyWeights(vrm, targetWeights) {
   if (lerpRAF) cancelAnimationFrame(lerpRAF);
 
   lerpFrom = snapshotWeights(vrm, targetWeights);
-  lerpTo = targetWeights;
+  // Reset keys present in lerpFrom but absent in target → lerp to 0
+  lerpTo = { ...targetWeights };
+  for (const key of Object.keys(lerpFrom)) {
+    if (!(key in lerpTo)) lerpTo[key] = 0;
+  }
   lerpStart = performance.now();
   currentExpression = targetWeights;
   tickLerp(vrm);

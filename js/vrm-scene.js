@@ -16,6 +16,12 @@ let renderer, scene, camera, clock;
 let currentVRM = null;
 let animationFrameId = null;
 
+/* Bone refs for idle animation (recorded once on load, set absolutely per frame) */
+let breathingBone = null;
+let breathingBoneOriginalY = 0;
+let breathingScene = null;
+let breathingSceneOriginalY = 0;
+
 /* Idle state */
 let lastBlinkTime = 0;
 let nextBlinkInterval = randomBlinkInterval();
@@ -96,6 +102,25 @@ export async function loadVRM(buffer, name = 'model') {
 
     scene.add(vrm.scene);
     currentVRM = vrm;
+
+    // Record bone refs for idle animation (absolute positioning, not cumulative)
+    breathingBone = null;
+    breathingScene = null;
+    try {
+      for (const name of ['spine', 'chest', 'upperChest']) {
+        const bone = vrm.humanoid?.getNormalizedBoneNode?.(name);
+        if (bone) {
+          breathingBone = bone;
+          breathingBoneOriginalY = bone.position.y;
+          break;
+        }
+      }
+    } catch { /* bone access may fail */ }
+    if (!breathingBone && vrm.scene) {
+      breathingScene = vrm.scene;
+      breathingSceneOriginalY = vrm.scene.position.y;
+    }
+
     lastBlinkTime = performance.now();
     nextBlinkInterval = randomBlinkInterval();
     blinkPhase = 'idle';
@@ -170,19 +195,11 @@ function applyBreathing(now) {
   const amplitude = 0.008; // ~8mm, visible but subtle
   const offset = Math.sin((now * 0.001 * Math.PI * 2) / cycle) * amplitude;
 
-  // Try spine bone first, fall back to model root
-  let moved = false;
-  try {
-    const bones = ['spine', 'chest', 'upperChest'];
-    for (const name of bones) {
-      const bone = currentVRM.humanoid?.getNormalizedBoneNode?.(name);
-      if (bone) { bone.position.y += offset; moved = true; break; }
-    }
-  } catch { /* bone access may fail */ }
-
-  // Fallback: oscillate entire model
-  if (!moved && currentVRM.scene) {
-    currentVRM.scene.position.y += offset * 5;
+  // Use recorded bone refs — set absolute position, not cumulative
+  if (breathingBone) {
+    breathingBone.position.y = breathingBoneOriginalY + offset;
+  } else if (breathingScene) {
+    breathingScene.position.y = breathingSceneOriginalY + offset * 5;
   }
 }
 
