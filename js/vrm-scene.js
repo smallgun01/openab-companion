@@ -167,38 +167,80 @@ export async function loadVRM(buffer, name = 'model') {
 function setupVRM0xBones(vrm) {
   if (!vrm.scene) return;
 
+  // Collect all bone-like nodes for debug + position-based matching
+  const bones = [];
   vrm.scene.traverse((node) => {
     if (!node.isBone && !node.isObject3D) return;
+    if (!node.name) return;
+    bones.push(node);
+
     const n = node.name;
+    const lower = n.toLowerCase();
 
     // Breathing target: spine / chest
     if (!breathingBone) {
-      const lower = n.toLowerCase();
-      if (lower.includes('spine') || lower.includes('chest') || lower.includes('上半身')) {
+      if (lower.includes('spine') || lower.includes('chest') || lower.includes('せなか') ||
+          lower.includes('上半身') || lower.includes('背骨') || lower.includes('脊椎')) {
         breathingBone = node;
         breathingBoneOriginalY = node.position.y;
       }
     }
 
-    // Arm bones for idle pose
-    const lowerN = n.toLowerCase();
-    if (lowerN.includes('upperarm') || lowerN.includes('upper_arm') || lowerN.includes('肩')) {
-      if (lowerN.includes('left') || lowerN.includes('l_')) {
+    // ── Arm detection: try name patterns first ──
+    const isUpperArm = (
+      lower.includes('upperarm') || lower.includes('upper_arm') ||
+      lower.includes('肩') || lower.includes('shoulder') || lower.includes('二の腕') ||
+      lower.includes('arm') && (lower.includes('upper') || lower.includes('up_'))
+    );
+    const isLowerArm = (
+      lower.includes('lowerarm') || lower.includes('lower_arm') ||
+      lower.includes('forearm') || lower.includes('前腕') || lower.includes('ひじ') ||
+      lower.includes('elbow') || lower.includes('腕') && !isUpperArm
+    );
+
+    if (isUpperArm) {
+      if (lower.includes('left') || lower.includes('l_') || lower.includes('左')) {
         leftUpperArm = node;
-      } else if (lowerN.includes('right') || lowerN.includes('r_')) {
+      } else if (lower.includes('right') || lower.includes('r_') || lower.includes('右')) {
         rightUpperArm = node;
-      } else {
-        // fallback: check position.x sign
-        if (!leftUpperArm) leftUpperArm = node;
       }
     }
-    if (lowerN.includes('lowerarm') || lowerN.includes('lower_arm') || lowerN.includes('forearm') || lowerN.includes('ひじ')) {
-      if (lowerN.includes('left') || lowerN.includes('l_')) {
+    if (isLowerArm) {
+      if (lower.includes('left') || lower.includes('l_') || lower.includes('左')) {
         leftLowerArm = node;
-      } else if (lowerN.includes('right') || lowerN.includes('r_')) {
+      } else if (lower.includes('right') || lower.includes('r_') || lower.includes('右')) {
         rightLowerArm = node;
       }
     }
+  });
+
+  // ── Fallback: position-based detection ──
+  // In T-pose, upper arm bones are the highest bones away from center on ±X
+  if (!leftUpperArm || !rightUpperArm) {
+    for (const bone of bones) {
+      const wp = new THREE.Vector3();
+      bone.getWorldPosition(wp);
+      // Upper arms: |X| > 0.15, Y > 0.8 (shoulder height), isBone
+      if (bone.isBone && Math.abs(wp.x) > 0.1 && wp.y > 0.7) {
+        if (wp.x > 0 && !leftUpperArm) leftUpperArm = bone;
+        if (wp.x < 0 && !rightUpperArm) rightUpperArm = bone;
+      }
+      // Forearms: |X| > 0.3 (further out), Y > 0.7
+      if (bone.isBone && Math.abs(wp.x) > 0.25 && wp.y > 0.6 && wp.y < 1.2) {
+        if (wp.x > 0 && !leftLowerArm) leftLowerArm = bone;
+        if (wp.x < 0 && !rightLowerArm) rightLowerArm = bone;
+      }
+    }
+  }
+
+  // Debug: log found arm bones
+  console.log('[vrm-scene] Arm bones detected:', {
+    leftUpper: leftUpperArm?.name || 'NOT FOUND',
+    rightUpper: rightUpperArm?.name || 'NOT FOUND',
+    leftLower: leftLowerArm?.name || 'NOT FOUND',
+    rightLower: rightLowerArm?.name || 'NOT FOUND',
+    totalBones: bones.length,
+    sampleNames: bones.filter(b => b.isBone).slice(0, 15).map(b => b.name),
   });
 }
 
