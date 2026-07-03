@@ -186,51 +186,73 @@ function setupVRM0xBones(vrm) {
       }
     }
 
-    // ── Arm detection: try name patterns first ──
+    // ── Arm detection: try name patterns, prefer non-Normalized bones ──
     const isUpperArm = (
-      lower.includes('upperarm') || lower.includes('upper_arm') ||
-      lower.includes('肩') || lower.includes('shoulder') || lower.includes('二の腕') ||
-      lower.includes('arm') && (lower.includes('upper') || lower.includes('up_'))
+      (lower.includes('upperarm') || lower.includes('upper_arm') || lower.includes('肩') ||
+       lower.includes('shoulder')) && !lower.includes('normalized')
     );
     const isLowerArm = (
-      lower.includes('lowerarm') || lower.includes('lower_arm') ||
-      lower.includes('forearm') || lower.includes('前腕') || lower.includes('ひじ') ||
-      lower.includes('elbow') || lower.includes('腕') && !isUpperArm
+      (lower.includes('lowerarm') || lower.includes('lower_arm') || lower.includes('forearm') ||
+       lower.includes('前腕') || lower.includes('elbow')) && !lower.includes('normalized')
     );
 
+    const isLeft = lower.includes('left') || lower.includes('_l_') || lower.includes('左') || lower.includes('l_upper') || lower.includes('l_lower');
+    const isRight = lower.includes('right') || lower.includes('_r_') || lower.includes('右') || lower.includes('r_upper') || lower.includes('r_lower');
+
     if (isUpperArm) {
-      if (lower.includes('left') || lower.includes('l_') || lower.includes('左')) {
-        leftUpperArm = node;
-      } else if (lower.includes('right') || lower.includes('r_') || lower.includes('右')) {
-        rightUpperArm = node;
-      }
+      if (isLeft) leftUpperArm = node;
+      else if (isRight) rightUpperArm = node;
+      // Don't set ambiguous upper arms here — let position fallback handle
     }
     if (isLowerArm) {
-      if (lower.includes('left') || lower.includes('l_') || lower.includes('左')) {
-        leftLowerArm = node;
-      } else if (lower.includes('right') || lower.includes('r_') || lower.includes('右')) {
-        rightLowerArm = node;
-      }
+      if (isLeft) leftLowerArm = node;
+      else if (isRight) rightLowerArm = node;
     }
   });
 
-  // ── Fallback: position-based detection ──
-  // In T-pose, upper arm bones are the highest bones away from center on ±X
+  // ── Fallback: position-based detection (exclude Normalized_ bones) ──
+  const isRealBone = (bone) => bone.isBone && !bone.name.toLowerCase().includes('normalized');
+
   if (!leftUpperArm || !rightUpperArm) {
+    let bestLeft = null, bestRight = null, bestLeftDist = Infinity, bestRightDist = Infinity;
     for (const bone of bones) {
+      if (!isRealBone(bone)) continue;
       const wp = new THREE.Vector3();
       bone.getWorldPosition(wp);
-      // Upper arms: |X| > 0.15, Y > 0.8 (shoulder height), isBone
-      if (bone.isBone && Math.abs(wp.x) > 0.1 && wp.y > 0.7) {
-        if (wp.x > 0 && !leftUpperArm) leftUpperArm = bone;
-        if (wp.x < 0 && !rightUpperArm) rightUpperArm = bone;
-      }
-      // Forearms: |X| > 0.3 (further out), Y > 0.7
-      if (bone.isBone && Math.abs(wp.x) > 0.25 && wp.y > 0.6 && wp.y < 1.2) {
-        if (wp.x > 0 && !leftLowerArm) leftLowerArm = bone;
-        if (wp.x < 0 && !rightLowerArm) rightLowerArm = bone;
+      // Upper arm: high Y, significant X, close to body center
+      if (wp.y > 0.7 && Math.abs(wp.x) > 0.05) {
+        const dist = Math.abs(wp.y - 1.0); // prefer shoulder height (~1.0)
+        if (wp.x > 0 && dist < bestLeftDist && wp.x < 0.5) {
+          bestLeftDist = dist; bestLeft = bone;
+        }
+        if (wp.x < 0 && dist < bestRightDist && wp.x > -0.5) {
+          bestRightDist = dist; bestRight = bone;
+        }
       }
     }
+    if (!leftUpperArm) leftUpperArm = bestLeft;
+    if (!rightUpperArm) rightUpperArm = bestRight;
+  }
+
+  if (!leftLowerArm || !rightLowerArm) {
+    let bestLL = null, bestRL = null, bestLLDist = Infinity, bestRLDist = Infinity;
+    for (const bone of bones) {
+      if (!isRealBone(bone)) continue;
+      const wp = new THREE.Vector3();
+      bone.getWorldPosition(wp);
+      // Lower arm: further out on X than upper arm
+      if (wp.y > 0.5 && Math.abs(wp.x) > 0.2) {
+        const dist = Math.abs(Math.abs(wp.x) - 0.35); // prefer ~0.35 from center
+        if (wp.x > 0 && dist < bestLLDist && wp.x < 0.8) {
+          bestLLDist = dist; bestLL = bone;
+        }
+        if (wp.x < 0 && dist < bestRLDist && wp.x > -0.8) {
+          bestRLDist = dist; bestRL = bone;
+        }
+      }
+    }
+    if (!leftLowerArm) leftLowerArm = bestLL;
+    if (!rightLowerArm) rightLowerArm = bestRL;
   }
 
   // Debug: log found arm bones
@@ -246,27 +268,57 @@ function setupVRM0xBones(vrm) {
 
 /**
  * Rotate arms from T-pose to natural resting pose.
- * Only needed for VRM 0.x models without built-in animations.
+ * Called every frame in case vrm.update() resets transforms.
+ * Only for VRM 0.x models without built-in animations.
  */
+let idlePoseApplied = false;
 function applyIdlePose() {
-  // Rotate upper arms down ~60° from horizontal (T-pose arms = 90° from body)
-  const upperArmAngle = THREE.MathUtils.degToRad(-55);
-  const lowerArmAngle = THREE.MathUtils.degToRad(-15);
+  if (idlePoseApplied) return; // apply once on load
 
+  // For Biped skeletons, the shoulder rotation axis varies.
+  // Try the most common axes for VRM 0.x models.
+  const upperDeg = -50;  // rotate upper arm down
+  const lowerDeg = -20;  // slight elbow bend
+
+  const upperRad = THREE.MathUtils.degToRad(upperDeg);
+  const lowerRad = THREE.MathUtils.degToRad(lowerDeg);
+
+  // Try setting rotation on X (most common for side-to-body rotation in Biped)
   if (leftUpperArm) {
-    leftUpperArm.rotation.z = -upperArmAngle;
-    leftUpperArm.rotation.x = THREE.MathUtils.degToRad(-10);
+    leftUpperArm.rotation.x = upperRad;
+    leftUpperArm.rotation.order = 'YXZ';
   }
   if (rightUpperArm) {
-    rightUpperArm.rotation.z = upperArmAngle;
-    rightUpperArm.rotation.x = THREE.MathUtils.degToRad(-10);
+    rightUpperArm.rotation.x = upperRad;
+    rightUpperArm.rotation.order = 'YXZ';
   }
   if (leftLowerArm) {
-    leftLowerArm.rotation.z = lowerArmAngle;
+    leftLowerArm.rotation.x = lowerRad;
+    leftLowerArm.rotation.order = 'YXZ';
   }
   if (rightLowerArm) {
-    rightLowerArm.rotation.z = -lowerArmAngle;
+    rightLowerArm.rotation.x = lowerRad;
+    rightLowerArm.rotation.order = 'YXZ';
   }
+
+  // Also apply to arm IK targets if they exist (some models use IK)
+  if (currentVRM?.scene) {
+    currentVRM.scene.traverse((node) => {
+      const nl = node.name.toLowerCase();
+      if (nl.includes('arm_ik') || nl.includes('armik') || nl.includes('hand_ik')) {
+        if (nl.includes('left') || nl.includes('_l_')) {
+          node.position.y -= 0.3;
+        } else if (nl.includes('right') || nl.includes('_r_')) {
+          node.position.y -= 0.3;
+        }
+      }
+    });
+  }
+
+  idlePoseApplied = true;
+  console.log('[vrm-scene] Idle pose applied. Upper arms:',
+    leftUpperArm?.name, rightUpperArm?.name,
+    '| rotationX:', leftUpperArm?.rotation.x, rightUpperArm?.rotation.x);
 }
 
 /** Get the current VRM instance (or null). */
