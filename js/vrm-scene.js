@@ -151,6 +151,10 @@ export async function loadVRM(buffer, name = 'model') {
       '| upper arms:', leftUpperArm?.name || 'by-pos', rightUpperArm?.name || 'by-pos',
       '| hasExpression:', !!vrm.expressionManager || !!vrm.blendShapeProxy);
 
+    // Expose for console debugging
+    window.__vrm = vrm;
+    window.__bones = { leftUpperArm, rightUpperArm, leftLowerArm, rightLowerArm };
+
     return vrm;
   } catch (err) {
     URL.revokeObjectURL(url);
