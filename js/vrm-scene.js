@@ -276,27 +276,28 @@ function applyIdlePose() {
   if (!leftUpperArm && !rightUpperArm && !leftLowerArm && !rightLowerArm) return;
 
   // Axis-angle: rotate around Z axis (Biped arm joint rotation)
-  const upperAngle = -0.9;  // ~-52° — arm down from horizontal
-  const lowerAngle = -0.35; // ~-20° — slight elbow bend
+  // Sign convention depends on model's local bone axes. Tune per-model.
+  const upperAngle = 0.9;   // +52° — arm down from T-pose
+  const lowerAngle = 0.35;  // +20° — slight elbow bend
 
   if (leftUpperArm) {
     leftUpperArm.quaternion.setFromAxisAngle(
-      new THREE.Vector3(0, 0, 1), upperAngle
+      new THREE.Vector3(0, 0, 1), -upperAngle
     );
   }
   if (rightUpperArm) {
     rightUpperArm.quaternion.setFromAxisAngle(
-      new THREE.Vector3(0, 0, -1), upperAngle
+      new THREE.Vector3(0, 0, 1), upperAngle
     );
   }
   if (leftLowerArm) {
     leftLowerArm.quaternion.setFromAxisAngle(
-      new THREE.Vector3(0, 0, 1), lowerAngle
+      new THREE.Vector3(0, 0, 1), -lowerAngle
     );
   }
   if (rightLowerArm) {
     rightLowerArm.quaternion.setFromAxisAngle(
-      new THREE.Vector3(0, 0, -1), lowerAngle
+      new THREE.Vector3(0, 0, 1), lowerAngle
     );
   }
 }
