@@ -1,12 +1,13 @@
 /**
- * main.js — Entry point. Wires VRM scene, chat, expression, settings together.
+ * main.js — Entry point. Wires VRM scene, chat, expression, settings, animation together.
  */
-import { parseAndApply } from './expression.js';
+import { parseAndApply, getLastEmotion } from './expression.js';
 import { sendMessage } from './chat.js';
 import { getSettings, saveSettings, saveModel, loadModel } from './settings.js';
+import { playClip, stopClip, isPlaying, loadClips } from './animation.js';
 
 // Dynamic imports — VRM module may fail; chat always works
-let initScene, loadVRM, getVRM, setBackgroundColor;
+let initScene, loadVRM, getVRM, setBackgroundColor, vrmRestPoseRotations;
 let vrmAvailable = false;
 let vrmErrorMsg = '';
 const vrmReady = (async () => {
@@ -16,6 +17,7 @@ const vrmReady = (async () => {
     loadVRM = mod.loadVRM;
     getVRM = mod.getVRM;
     setBackgroundColor = mod.setBackgroundColor;
+    vrmRestPoseRotations = mod.restPoseRotations;
     vrmAvailable = true;
   } catch (err) {
     vrmErrorMsg = err.message || String(err);
@@ -58,6 +60,9 @@ async function init() {
 
     // Wait for VRM module to load (or fail)
     await vrmReady;
+
+    // Preload animation clips (non-blocking)
+    if (vrmAvailable) loadClips();
 
     // VRM Scene (may be unavailable — chat still works)
     if (vrmAvailable && initScene) {
@@ -149,6 +154,10 @@ async function handleSend() {
   retryCount = 0;
   setStatus('connected', 'Typing…');
 
+  // Start talk gesture during streaming
+  const vrm = vrmAvailable ? getVRM?.() : null;
+  if (vrm) playClip(vrm, 'talk_gesture');
+
   const abort = new AbortController();
   streamingAbort = abort;
 
@@ -176,10 +185,23 @@ async function handleSend() {
     },
     onDone() {
       // Final expression parse
-      const vrm = vrmAvailable ? getVRM?.() : null;
-      if (vrm) {
-        const cleaned = parseAndApply(fullText, vrm);
+      const vrm2 = vrmAvailable ? getVRM?.() : null;
+      if (vrm2) {
+        const cleaned = parseAndApply(fullText, vrm2);
         contentSpan.textContent = cleaned;
+
+        // Stop talk gesture → apply emotion-based animation
+        stopClip(vrm2, vrmRestPoseRotations);
+        const lastEmotion = getLastEmotion();
+        const EMOTION_CLIPS = {
+          happy: 'wave', excited: 'wave',
+          thinking: 'think', confused: 'think',
+          surprised: 'nod',
+        };
+        const animName = EMOTION_CLIPS[lastEmotion];
+        if (animName) {
+          playClip(vrm2, animName);
+        }
       }
       cursorSpan?.remove();
       assistantBubble.classList.remove('streaming');

@@ -17,13 +17,14 @@ import {
   VRMHumanBoneName,
   VRMExpressionPresetName,
 } from '@pixiv/three-vrm/lib/three-vrm.module.js';
+import { sampleClip } from './animation.js';
 
 let renderer, scene, camera, clock;
 let currentVRM = null;
 let animationFrameId = null;
 
 /* Rest-pose rotations (applied once after load; vrm.update() won't reset them) */
-const restPoseRotations = {};
+export const restPoseRotations = {};
 
 /* Idle state */
 let idleStartTime = 0;
@@ -187,7 +188,12 @@ function animate() {
   const now = performance.now() / 1000;
 
   if (currentVRM) {
-    updateIdle(delta, now);
+    // Sample skeletal animation (if playing) — returns Set of bone names being driven
+    const animatedBones = sampleClip(now, currentVRM, restPoseRotations);
+
+    // Idle animations (skip bones controlled by the active clip)
+    updateIdle(now, animatedBones);
+
     currentVRM.update(delta);
   }
 
@@ -196,31 +202,39 @@ function animate() {
 
 /* ── Idle Animations ──────────────────────────────────── */
 
-function updateIdle(delta, now) {
+/**
+ * @param {number} now           — performance.now() / 1000
+ * @param {Set<string>|null} animatedBones — bones being driven by animation clip
+ */
+function updateIdle(now, animatedBones) {
   if (!currentVRM) return;
 
-  // Breathing — subtle spine rotation
-  const breathPeriod = 3.5;
-  const breathPhase = ((now - idleStartTime) / breathPeriod) * 2.0 * Math.PI;
-  const breathValue = (Math.sin(breathPhase) + 1.0) / 2.0;
-  const spineNode = currentVRM.humanoid?.getNormalizedBoneNode?.(VRMHumanBoneName.Spine);
-  if (spineNode) {
-    spineNode.quaternion.setFromAxisAngle(
-      new THREE.Vector3(1, 0, 0), breathValue * 0.012
-    );
+  // Breathing — skip if spine is being animated
+  if (!animatedBones || !animatedBones.has('spine')) {
+    const breathPeriod = 3.5;
+    const breathPhase = ((now - idleStartTime) / breathPeriod) * 2.0 * Math.PI;
+    const breathValue = (Math.sin(breathPhase) + 1.0) / 2.0;
+    const spineNode = currentVRM.humanoid?.getNormalizedBoneNode?.(VRMHumanBoneName.Spine);
+    if (spineNode) {
+      spineNode.quaternion.setFromAxisAngle(
+        new THREE.Vector3(1, 0, 0), breathValue * 0.012
+      );
+    }
   }
 
-  // Head sway
-  const swayX = Math.sin((now - idleStartTime) / 8.0 * 2.0 * Math.PI) * 0.03;
-  const swayY = Math.cos((now - idleStartTime) / 10.0 * 2.0 * Math.PI) * 0.02;
-  const headNode = currentVRM.humanoid?.getNormalizedBoneNode?.(VRMHumanBoneName.Head);
-  if (headNode) {
-    const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), swayX);
-    const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), swayY);
-    headNode.quaternion.multiplyQuaternions(qx, qy);
+  // Head sway — skip if head is being animated
+  if (!animatedBones || !animatedBones.has('head')) {
+    const swayX = Math.sin((now - idleStartTime) / 8.0 * 2.0 * Math.PI) * 0.03;
+    const swayY = Math.cos((now - idleStartTime) / 10.0 * 2.0 * Math.PI) * 0.02;
+    const headNode = currentVRM.humanoid?.getNormalizedBoneNode?.(VRMHumanBoneName.Head);
+    if (headNode) {
+      const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), swayX);
+      const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), swayY);
+      headNode.quaternion.multiplyQuaternions(qx, qy);
+    }
   }
 
-  // Blink
+  // Blink — always runs (expression, never in conflict with skeletal anim)
   applyBlink(now);
 }
 

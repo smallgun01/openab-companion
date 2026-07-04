@@ -4,22 +4,40 @@
  *   parseAndApply(text, vrm) → returns cleaned text (tags stripped)
  *
  * After VRMUtils.rotateVRM0(), both VRM 0.x and 1.0 expose expressionManager.
- * Supports 9 MVP emotions with lerp transitions over 300ms.
+ * Map 19 emotions → 6 standard VRM expression presets via weighted blends.
+ *
+ * Base mapping adapted from catsmice/AniCompanion (MIT),
+ * enhanced with compound blends for finer facial differentiation.
  */
 import { setExpressionValue, getExpressionValue, getExpressionNames, hasExpressions } from './vrm-scene.js';
 
 /* ── Emotion → expression weight maps ─────────────────── */
 
 const EMOTION_WEIGHTS = {
+  // ── 6 primitive VRM presets (direct mapping) ──
   happy:      { happy: 1.0 },
   sad:        { sad: 1.0 },
   angry:      { angry: 1.0 },
   surprised:  { surprised: 1.0 },
   relaxed:    { relaxed: 1.0 },
+  neutral:    { neutral: 1.0 },
+
+  // ── Original compound emotions (preserved) ──
   thinking:   { neutral: 1.0 },
   confused:   { sad: 0.3, surprised: 0.3 },
   excited:    { happy: 1.0, surprised: 0.5 },
-  neutral:    { neutral: 1.0 },
+
+  // ── AniCompanion's 10 additional emotions (enhanced compound mappings) ──
+  curious:    { relaxed: 0.5, surprised: 0.2 },   // wide eyes, soft face
+  shy:        { relaxed: 0.6, sad: 0.2 },         // soft + faint hesitation
+  love:       { happy: 0.8, relaxed: 0.3 },        // soft smile, not full grin
+  smirk:      { happy: 0.5, neutral: 0.5 },        // half-smile
+  sleepy:     { relaxed: 0.5, neutral: 0.5 },       // droopy, unfocused
+  proud:      { happy: 0.8, neutral: 0.2 },         // confident, not giddy
+  disgusted:  { angry: 0.7, sad: 0.2 },             // scowl + nose wrinkle
+  pain:       { sad: 0.8, angry: 0.2 },              // grimace
+  laugh:      { happy: 1.0, surprised: 0.2 },        // wide smile + bright eyes
+  bored:      { neutral: 0.7, relaxed: 0.3 },        // flat + droopy
 };
 
 const TAG_RE = /\[([a-zA-Z]+)\]/g;
@@ -30,6 +48,10 @@ let lerpStart = 0;
 let lerpFrom = {};
 let lerpTo = {};
 const LERP_MS = 300;
+
+/** Track the last detected emotion key for animation triggering. */
+let lastEmotionKey = 'neutral';
+export function getLastEmotion() { return lastEmotionKey; }
 
 /* ── Public API ───────────────────────────────────────── */
 
@@ -44,6 +66,7 @@ export function parseAndApply(text, vrm) {
   }).replace(/\s{2,}/g, ' ').trim();
 
   const emotionKey = tags.length > 0 ? tags[tags.length - 1] : 'neutral';
+  lastEmotionKey = emotionKey;
   const targetWeights = EMOTION_WEIGHTS[emotionKey] || EMOTION_WEIGHTS.neutral;
 
   if (lerpRAF) cancelAnimationFrame(lerpRAF);
