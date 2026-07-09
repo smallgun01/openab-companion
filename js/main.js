@@ -78,7 +78,7 @@ async function init() {
     } else {
       // VRM unavailable — show a friendly placeholder
       const hint = vrmErrorMsg ? ` (${vrmErrorMsg})` : '';
-      modelPrompt.textContent = `🎭 3D renderer unavailable${hint}. Chat still works — set your endpoint in Settings (⚙️).`;
+      modelPrompt.innerHTML = `<p>🎭 3D renderer unavailable${hint}. Chat still works — set your endpoint in Settings (⚙️).</p>`;
     }
 
     // Apply saved background
