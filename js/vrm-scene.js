@@ -50,7 +50,7 @@ export function initScene(canvas, bgColor = '#1a1a2e') {
   scene.background = new THREE.Color(bgColor);
 
   camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-  camera.position.set(0, 1.2, 5.0);
+  camera.position.set(0, 1.2, 4.0);
   camera.lookAt(0, 0.9, 0);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.4));
@@ -90,7 +90,7 @@ export async function loadVRM(buffer, name = 'model') {
     const specVersion = vrm.meta?.specVersion || '0.0';
 
     // Detect VRM 1.0 by API presence (meta.specVersion may report "0.0" for 1.0 models)
-    const isVRM1 = typeof vrm.humanoid?.getNormalizedBoneNode === "function";
+    const isVRM1 = typeof vrm.lookAt === 'function';
 
     // ── Critical: rotate VRM 0.x to standard orientation + set up bone mapping ──
     if (!isVRM1) {
