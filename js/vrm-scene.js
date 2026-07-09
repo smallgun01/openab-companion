@@ -126,23 +126,19 @@ export async function loadVRM(buffer, name = 'model') {
  */
 function applyRestPose(vrm, specVersion) {
   const isVRM1 = specVersion === '1.0';
-  // VRM 0.x (after rotateVRM0): Z-axis lowers arms from T-pose
-  // VRM 1.0 (normalized bones): X-axis lowers arms from T-pose
-  const axis = new THREE.Vector3(0, 0, 1);
-    ? new THREE.Vector3(1, 0, 0)
-    : new THREE.Vector3(0, 0, 1);
   const armAngle = 60.0 * Math.PI / 180.0;
   const forearmAngle = 5.0 * Math.PI / 180.0;
 
-  // VRM 1.0: negate angle on left arm (X-axis rotation direction differs)
-  const leftSign = isVRM1 ? -1 : 1;
-  const rightSign = isVRM1 ? 1 : -1;
+  // Both versions: Z-axis rotation lowers arms from T-pose
+  // VRM 0.x: copy() replaces zero rest rotation
+  // VRM 1.0: multiply() composes with existing rest rotation
+  const rotAxis = new THREE.Vector3(0, 0, 1);
 
   const poses = [
-    [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(axis, leftSign * armAngle)],
-    [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(axis, rightSign * armAngle)],
-    [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(axis, forearmAngle)],
-    [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(axis, -forearmAngle)],
+    [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(rotAxis, armAngle)],
+    [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(rotAxis, -armAngle)],
+    [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(rotAxis, forearmAngle)],
+    [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(rotAxis, -forearmAngle)],
   ];
 
   for (const [boneName, quat] of poses) {
