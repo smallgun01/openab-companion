@@ -50,7 +50,7 @@ export function initScene(canvas, bgColor = '#1a1a2e') {
   scene.background = new THREE.Color(bgColor);
 
   camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
-  camera.position.set(0, 1.2, 3.5);
+  camera.position.set(0, 1.2, 5.0);
   camera.lookAt(0, 0.9, 0);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.4));
@@ -149,7 +149,10 @@ function applyRestPose(vrm, specVersion) {
     const node = vrm.humanoid?.getNormalizedBoneNode?.(boneName);
     if (node) {
       node.quaternion.copy(quat);
+      console.log("[vrm-scene] rest pose:", boneName, "→ OK");
       restPoseRotations[boneName] = quat.clone();
+    } else {
+      console.warn("[vrm-scene] rest pose:", boneName, "→ bone NOT found");
     }
   }
 
