@@ -44,7 +44,7 @@ export function initScene(canvas, bgColor = '#1a1a2e') {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.9;
+  renderer.toneMappingExposure = 0.65;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(bgColor);
@@ -53,11 +53,11 @@ export function initScene(canvas, bgColor = '#1a1a2e') {
   camera.position.set(0, 1.2, 3.5);
   camera.lookAt(0, 1.0, 0);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-  const key = new THREE.DirectionalLight(0xffffff, 1.8);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+  const key = new THREE.DirectionalLight(0xffffff, 1.0);
   key.position.set(0, 2, 3);
   scene.add(key);
-  const rim = new THREE.DirectionalLight(0xe6e6e6, 0.6);
+  const rim = new THREE.DirectionalLight(0xcccccc, 0.3);
   rim.position.set(0, 1.5, -2);
   scene.add(rim);
 
