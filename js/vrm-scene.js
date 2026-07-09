@@ -125,6 +125,8 @@ export async function loadVRM(buffer, name = 'model') {
  * Rotations are NOT reset by vrm.update() — they stick for the lifetime of the model.
  */
 function applyRestPose(vrm, specVersion) {
+// getNormalizedBoneNode() normalizes bone space for both VRM 0.x and 1.0.
+  // The A-pose assumption (60° arms) applies to both specs.
   const armAngle = 60.0 * Math.PI / 180.0;
   const forearmAngle = 5.0 * Math.PI / 180.0;
 

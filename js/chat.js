@@ -55,7 +55,11 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
       signal: timeoutController.signal,
     });
   } catch (err) {
-    if (err.name === 'AbortError') return;
+    if (err.name === 'AbortError' && err.message !== 'Request timeout') return;
+    if (err.message === 'Request timeout') {
+      onError?.(0, 'Request timeout after 60s');
+      return;
+    }
     onError?.(0, err.message || 'Network error');
     return;
   } finally {
@@ -142,7 +146,11 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
       }
     }
   } catch (err) {
-    if (err.name === 'AbortError') return;
+    if (err.name === 'AbortError' && err.message !== 'Request timeout') return;
+    if (err.message === 'Request timeout') {
+      onError?.(0, 'Request timeout after 60s');
+      return;
+    }
     onError?.(0, err.message);
     return;
   }
