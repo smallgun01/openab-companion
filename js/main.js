@@ -117,6 +117,7 @@ async function init() {
 
   // Chat always available (model is optional)
   enableChat();
+  document.getElementById('choose-vrm-btn')?.addEventListener('click', () => document.getElementById('model-file-input')?.click());
 }
 
 function wireEvents() {

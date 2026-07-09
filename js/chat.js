@@ -37,6 +37,7 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
   const FETCH_TIMEOUT_MS = 60000;
   const timeoutController = new AbortController();
   let timeoutId;
+  let timedOut = false;
 
   // Propagate external abort signal to our timeout controller
   if (signal) {
@@ -46,7 +47,7 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
 
   let response;
   try {
-    timeoutId = setTimeout(() => timeoutController.abort(new Error('Request timeout')), FETCH_TIMEOUT_MS);
+    timeoutId = setTimeout(() => { timedOut = true; timeoutController.abort(); }, FETCH_TIMEOUT_MS);
 
     response = await fetch(endpoint, {
       method: 'POST',
@@ -55,8 +56,8 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
       signal: timeoutController.signal,
     });
   } catch (err) {
-    if (err.name === 'AbortError' && err.message !== 'Request timeout') return;
-    if (err.message === 'Request timeout') {
+    if (err.name === 'AbortError' && !timedOut) return;
+    if (timedOut) {
       onError?.(0, 'Request timeout after 60s');
       return;
     }
@@ -84,7 +85,7 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
   let fullText = '';
   let lastId = '';
   let retryMs = 0;
-// TODO: reconnect with Last-Event-Id using lastId and retryMs
+  // TODO: reconnect with Last-Event-Id using lastId and retryMs
 
   try {
     while (true) {
@@ -147,8 +148,8 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
       }
     }
   } catch (err) {
-    if (err.name === 'AbortError' && err.message !== 'Request timeout') return;
-    if (err.message === 'Request timeout') {
+    if (err.name === 'AbortError' && !timedOut) return;
+    if (timedOut) {
       onError?.(0, 'Request timeout after 60s');
       return;
     }
