@@ -89,13 +89,16 @@ export async function loadVRM(buffer, name = 'model') {
 
     const specVersion = vrm.meta?.specVersion || '0.0';
 
+    // Detect VRM 1.0 by API presence (meta.specVersion may report "0.0" for 1.0 models)
+    const isVRM1 = typeof vrm.humanoid?.getNormalizedBoneNode === "function";
+
     // ── Critical: rotate VRM 0.x to standard orientation + set up bone mapping ──
-    if (specVersion === '0.0') {
+    if (!isVRM1) {
       VRMUtils.rotateVRM0(vrm);
     }
 
     // VRMUtils optimizations (safe for VRM 1.0)
-    if (specVersion === '1.0') {
+    if (isVRM1) {
       try {
         VRMUtils.removeUnnecessaryVertices(gltf.scene);
         VRMUtils.removeUnnecessaryJoints(gltf.scene);
@@ -106,7 +109,7 @@ export async function loadVRM(buffer, name = 'model') {
     currentVRM = vrm;
 
     // ── Apply rest pose: arms down from T-pose ──
-    applyRestPose(vrm, specVersion);
+    applyRestPose(vrm, isVRM1);
 
     idleStartTime = performance.now() / 1000;
     lastBlinkTime = idleStartTime;
@@ -124,11 +127,11 @@ export async function loadVRM(buffer, name = 'model') {
  * Apply A-pose from T-pose. Called once after load.
  * Rotations are NOT reset by vrm.update() — they stick for the lifetime of the model.
  */
-function applyRestPose(vrm, specVersion) {
+function applyRestPose(vrm, isVRM1) {
   const armAngle = 60.0 * Math.PI / 180.0;
   const forearmAngle = 5.0 * Math.PI / 180.0;
 
-  if (specVersion === '1.0') {
+  if (isVRM1) {
     // VRM 1.0: traverse scene graph for raw arm bones
     // Normalized bones may be read-only — rotate actual bone nodes directly
     const armBones = {
