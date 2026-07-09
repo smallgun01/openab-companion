@@ -84,6 +84,7 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
   let fullText = '';
   let lastId = '';
   let retryMs = 0;
+// TODO: reconnect with Last-Event-Id using lastId and retryMs
 
   try {
     while (true) {
