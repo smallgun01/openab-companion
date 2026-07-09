@@ -153,7 +153,7 @@ function applyRestPose(vrm, isVRM1, specVersion) {
 
     // Also try normalized bones as fallback
     if (Object.keys(restPoseRotations).length === 0) {
-      const allNames = []; vrm.scene.traverse(n => { if (n.name) allNames.push(n.name); }); console.log("[vrm-scene] All scene bone names:", allNames.slice(0, 30));
+      const allNames = []; vrm.scene.traverse(n => { if (n.name) allNames.push(n.name); }); console.log("[vrm-scene] All scene bone names:", allNames);
       console.warn('[vrm-scene] No VRM 1.0 bones found by name, trying normalized nodes...');
       console.log("[vrm-scene] Available bone names:", [...new Set(Array.from(vrm.scene.children).flatMap(c => { const names = []; c.traverse(n => { if (n.name) names.push(n.name); }); return names; }))].slice(0, 20));
       const poses = [
