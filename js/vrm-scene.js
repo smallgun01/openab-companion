@@ -142,8 +142,8 @@ function applyRestPose(vrm, isVRM1, specVersion) {
       LeftLowerArm:  { axis: new THREE.Vector3(0, 0, 1), angle: forearmAngle },
       RightLowerArm: { axis: new THREE.Vector3(0, 0, 1), angle: -forearmAngle },
       // Bip-style names (common in MMD/VRoid VRM 1.0 exports)
-      'J_Bip_L_UpperArm':  { axis: new THREE.Vector3(0, 0, 1), angle: armAngle },
-      'J_Bip_R_UpperArm':  { axis: new THREE.Vector3(0, 0, 1), angle: -armAngle },
+      'J_Bip_L_UpperArm':  { axis: new THREE.Vector3(0, 0, 1), angle: armAngle * 1.5 },
+      'J_Bip_R_UpperArm':  { axis: new THREE.Vector3(0, 0, 1), angle: -armAngle * 1.5 },
       'J_Bip_L_LowerArm':  { axis: new THREE.Vector3(0, 0, 1), angle: forearmAngle },
       'J_Bip_R_LowerArm':  { axis: new THREE.Vector3(0, 0, 1), angle: -forearmAngle },
       'J_Bip_L_Shoulder':  { axis: new THREE.Vector3(0, 0, 1), angle: armAngle * 0.3 },
