@@ -22,6 +22,7 @@ import { sampleClip } from './animation.js';
 let renderer, scene, camera, clock;
 let currentVRM = null;
 let animationFrameId = null;
+let vrm1RestPose = null; // VRM 1.0 rest pose rotations (applied per-frame)
 
 /* Rest-pose rotations (applied once after load; vrm.update() won't reset them) */
 export const restPoseRotations = {};
@@ -99,6 +100,9 @@ export async function loadVRM(buffer, name = 'model') {
 
     // VRMUtils optimizations (safe for VRM 1.0)
     if (isVRM1) {
+    // Store rest pose config — applied per-frame after vrm.update()
+    vrm1RestPose = armBones;
+    return;
       try {
         VRMUtils.removeUnnecessaryVertices(gltf.scene);
         VRMUtils.removeUnnecessaryJoints(gltf.scene);
@@ -132,6 +136,9 @@ function applyRestPose(vrm, isVRM1, specVersion) {
   const forearmAngle = 5.0 * Math.PI / 180.0;
 
   if (isVRM1) {
+    // Store rest pose config — applied per-frame after vrm.update()
+    vrm1RestPose = armBones;
+    return;
     // VRM 1.0: traverse scene graph for raw arm bones
     // Normalized bones may be read-only — rotate actual bone nodes directly
     // Common VRM 1.0 bone name patterns (Bip, MMD, VRoid conventions)
@@ -252,6 +259,16 @@ function animate() {
     updateIdle(now, animatedBones);
 
     currentVRM.update(delta);
+    // VRM 1.0: re-apply rest pose after update (raw bones may be reset)
+    if (vrm1RestPose && currentVRM) {
+      currentVRM.scene.traverse((node) => {
+        if (node.name && vrm1RestPose[node.name]) {
+          const cfg = vrm1RestPose[node.name];
+          const q = new THREE.Quaternion().setFromAxisAngle(cfg.axis, cfg.angle);
+          node.quaternion.multiply(q);
+        }
+      });
+    }
   }
 
   renderer.render(scene, camera);
