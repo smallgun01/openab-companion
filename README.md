@@ -25,7 +25,7 @@ node dev-server.mjs
 Browser                                   Backend
 ┌──────────────────────────────────┐     ┌──────────────────┐
 │ main.js                          │────▶│ OpenAB Gateway    │
-│  ├── vrm-scene.js  3D rendering │     │ (your-gateway.example.com)      │
+│  ├── vrm-scene.js  3D rendering │     │ (your endpoint)      │
 │  ├── chat.js       SSE stream   │     │ /v1/chat/complete │
 │  ├── expression.js emotion tags │     └──────────────────┘
 │  ├── animation.js  bone clips   │
