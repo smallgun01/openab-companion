@@ -134,11 +134,20 @@ function applyRestPose(vrm, isVRM1, specVersion) {
   if (isVRM1) {
     // VRM 1.0: traverse scene graph for raw arm bones
     // Normalized bones may be read-only — rotate actual bone nodes directly
+    // Common VRM 1.0 bone name patterns (Bip, MMD, VRoid conventions)
     const armBones = {
-      LeftUpperArm: { axis: new THREE.Vector3(0, 1, 0), angle: -armAngle },
-      RightUpperArm: { axis: new THREE.Vector3(0, 1, 0), angle: armAngle },
-      LeftLowerArm: { axis: new THREE.Vector3(0, 1, 0), angle: -forearmAngle },
-      RightLowerArm: { axis: new THREE.Vector3(0, 1, 0), angle: forearmAngle },
+      // Standard names
+      LeftUpperArm:  { axis: new THREE.Vector3(0, 0, 1), angle: armAngle },
+      RightUpperArm: { axis: new THREE.Vector3(0, 0, 1), angle: -armAngle },
+      LeftLowerArm:  { axis: new THREE.Vector3(0, 0, 1), angle: forearmAngle },
+      RightLowerArm: { axis: new THREE.Vector3(0, 0, 1), angle: -forearmAngle },
+      // Bip-style names (common in MMD/VRoid VRM 1.0 exports)
+      'J_Bip_L_UpperArm':  { axis: new THREE.Vector3(0, 0, 1), angle: armAngle },
+      'J_Bip_R_UpperArm':  { axis: new THREE.Vector3(0, 0, 1), angle: -armAngle },
+      'J_Bip_L_LowerArm':  { axis: new THREE.Vector3(0, 0, 1), angle: forearmAngle },
+      'J_Bip_R_LowerArm':  { axis: new THREE.Vector3(0, 0, 1), angle: -forearmAngle },
+      'J_Bip_L_Shoulder':  { axis: new THREE.Vector3(0, 0, 1), angle: armAngle * 0.3 },
+      'J_Bip_R_Shoulder':  { axis: new THREE.Vector3(0, 0, 1), angle: -armAngle * 0.3 },
     };
 
     vrm.scene.traverse((node) => {
