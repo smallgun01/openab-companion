@@ -125,42 +125,68 @@ export async function loadVRM(buffer, name = 'model') {
  * Rotations are NOT reset by vrm.update() — they stick for the lifetime of the model.
  */
 function applyRestPose(vrm, specVersion) {
-  const isVRM1 = specVersion === '1.0';
   const armAngle = 60.0 * Math.PI / 180.0;
   const forearmAngle = 5.0 * Math.PI / 180.0;
 
-  // Both versions: Z-axis rotation lowers arms from T-pose
-  // VRM 0.x: copy() replaces zero rest rotation
-  // VRM 1.0: multiply() composes with existing rest rotation
-  const rotAxis = new THREE.Vector3(0, 0, 1);
+  if (specVersion === '1.0') {
+    // VRM 1.0: traverse scene graph for raw arm bones
+    // Normalized bones may be read-only — rotate actual bone nodes directly
+    const armBones = {
+      LeftUpperArm: { axis: new THREE.Vector3(0, 1, 0), angle: -armAngle },
+      RightUpperArm: { axis: new THREE.Vector3(0, 1, 0), angle: armAngle },
+      LeftLowerArm: { axis: new THREE.Vector3(0, 1, 0), angle: -forearmAngle },
+      RightLowerArm: { axis: new THREE.Vector3(0, 1, 0), angle: forearmAngle },
+    };
 
-  const poses = [
-    [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(rotAxis, armAngle)],
-    [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(rotAxis, -armAngle)],
-    [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(rotAxis, forearmAngle)],
-    [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(rotAxis, -forearmAngle)],
-  ];
-
-  for (const [boneName, quat] of poses) {
-    const node = vrm.humanoid?.getNormalizedBoneNode?.(boneName);
-    if (node) {
-      if (isVRM1) {
-        node.quaternion.multiply(quat);
-      } else {
-        node.quaternion.copy(quat);
+    vrm.scene.traverse((node) => {
+      if (node.name && armBones[node.name]) {
+        const cfg = armBones[node.name];
+        const q = new THREE.Quaternion().setFromAxisAngle(cfg.axis, cfg.angle);
+        node.quaternion.multiply(q);
+        restPoseRotations[node.name] = q.clone();
+        console.log('[vrm-scene] VRM 1.0 rest pose:', node.name, '→ applied (Y-axis)');
       }
-      console.log("[vrm-scene] rest pose:", boneName, "→ OK");
-      restPoseRotations[boneName] = quat.clone();
-    } else {
-      console.warn("[vrm-scene] rest pose:", boneName, "→ bone NOT found");
+    });
+
+    // Also try normalized bones as fallback
+    if (Object.keys(restPoseRotations).length === 0) {
+      console.warn('[vrm-scene] No VRM 1.0 bones found by name, trying normalized nodes...');
+      const poses = [
+        [VRMHumanBoneName.LeftUpperArm, armAngle],
+        [VRMHumanBoneName.RightUpperArm, -armAngle],
+        [VRMHumanBoneName.LeftLowerArm, forearmAngle],
+        [VRMHumanBoneName.RightLowerArm, -forearmAngle],
+      ];
+      for (const [boneName, angle] of poses) {
+        const node = vrm.humanoid?.getNormalizedBoneNode?.(boneName);
+        if (node) {
+          node.quaternion.multiply(
+            new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle)
+          );
+          restPoseRotations[boneName] = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+        }
+      }
+    }
+  } else {
+    // VRM 0.x: existing approach (Z-axis, copy)
+    const poses = [
+      [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), armAngle)],
+      [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -armAngle)],
+      [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), forearmAngle)],
+      [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -forearmAngle)],
+    ];
+    for (const [boneName, quat] of poses) {
+      const node = vrm.humanoid?.getNormalizedBoneNode?.(boneName);
+      if (node) {
+        node.quaternion.copy(quat);
+        restPoseRotations[boneName] = quat.clone();
+      }
     }
   }
 
   console.log('[vrm-scene] VRM loaded:', vrm.meta?.name || '?',
     '| specVersion:', specVersion,
     '| rest pose applied:', Object.keys(restPoseRotations).length > 0);
-
-  // Debug: only expose on localhost
   if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') {
     window.__vrm = vrm;
   }
