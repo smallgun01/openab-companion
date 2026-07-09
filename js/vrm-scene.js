@@ -44,20 +44,20 @@ export function initScene(canvas, bgColor = '#1a1a2e') {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.45;
+  renderer.toneMappingExposure = 0.6;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(bgColor);
 
   camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
   camera.position.set(0, 1.2, 3.5);
-  camera.lookAt(0, 0.85, 0);
+  camera.lookAt(0, 0.9, 0);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
-  const key = new THREE.DirectionalLight(0xffffff, 0.7);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const key = new THREE.DirectionalLight(0xffffff, 1.0);
   key.position.set(0, 2, 3);
   scene.add(key);
-  const rim = new THREE.DirectionalLight(0xcccccc, 0.2);
+  const rim = new THREE.DirectionalLight(0xe0e0e0, 0.35);
   rim.position.set(0, 1.5, -2);
   scene.add(rim);
 
@@ -125,26 +125,28 @@ export async function loadVRM(buffer, name = 'model') {
  * Rotations are NOT reset by vrm.update() — they stick for the lifetime of the model.
  */
 function applyRestPose(vrm, specVersion) {
-  // Both VRM 0.x and 1.0 use Z-axis arm rotation.
-  // VRM 1.0 uses getRawBoneNode (normalized bones may reorient local axes).
   const isVRM1 = specVersion === '1.0';
-  const rotAxis = new THREE.Vector3(0, 0, 1);
+  // VRM 0.x (after rotateVRM0): Z-axis lowers arms from T-pose
+  // VRM 1.0 (normalized bones): X-axis lowers arms from T-pose
+  const axis = isVRM1
+    ? new THREE.Vector3(1, 0, 0)
+    : new THREE.Vector3(0, 0, 1);
   const armAngle = 60.0 * Math.PI / 180.0;
   const forearmAngle = 5.0 * Math.PI / 180.0;
 
+  // VRM 1.0: negate angle on left arm (X-axis rotation direction differs)
+  const leftSign = isVRM1 ? -1 : 1;
+  const rightSign = isVRM1 ? 1 : -1;
+
   const poses = [
-    [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(rotAxis, armAngle)],
-    [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(rotAxis, -armAngle)],
-    [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(rotAxis,  forearmAngle)],
-    [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(rotAxis, -forearmAngle)],
+    [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(axis, leftSign * armAngle)],
+    [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(axis, rightSign * armAngle)],
+    [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(axis, forearmAngle)],
+    [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(axis, -forearmAngle)],
   ];
 
   for (const [boneName, quat] of poses) {
-    // VRM 0.x: getNormalizedBoneNode after rotateVRM0
-    // VRM 1.0: getRawBoneNode (normalized bones may have different local axes)
-    const node = isVRM1
-      ? (vrm.humanoid?.getRawBoneNode?.(boneName) ?? vrm.humanoid?.getNormalizedBoneNode?.(boneName))
-      : vrm.humanoid?.getNormalizedBoneNode?.(boneName);
+    const node = vrm.humanoid?.getNormalizedBoneNode?.(boneName);
     if (node) {
       node.quaternion.copy(quat);
       restPoseRotations[boneName] = quat.clone();
