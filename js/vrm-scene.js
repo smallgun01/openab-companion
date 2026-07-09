@@ -28,7 +28,10 @@ export const restPoseRotations = {};
 
 /* Idle state */
 let idleStartTime = 0;
-const _idleVec3X = _idleVec3X;
+const _idleVec3X = new THREE.Vector3(1, 0, 0);
+const _idleVec3Y = new THREE.Vector3(0, 1, 0);
+const _idleQuatX = new THREE.Quaternion();
+const _idleQuatY = new THREE.Quaternion();
 let lastBlinkTime = 0;
 let nextBlinkInterval = randomBlinkInterval();
 let blinkPhase = 'idle';
@@ -229,8 +232,8 @@ function updateIdle(now, animatedBones) {
     const swayY = Math.cos((now - idleStartTime) / 10.0 * 2.0 * Math.PI) * 0.02;
     const headNode = currentVRM.humanoid?.getNormalizedBoneNode?.(VRMHumanBoneName.Head);
     if (headNode) {
-      const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), swayX);
-      const qx = new THREE.Quaternion().setFromAxisAngle(_idleVec3X, swayY);
+      const qy = _idleQuatX.setFromAxisAngle(_idleVec3Y, swayX);
+      const qx = _idleQuatY.setFromAxisAngle(_idleVec3X, swayY);
       headNode.quaternion.multiplyQuaternions(qx, qy);
     }
   }
