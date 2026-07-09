@@ -6,7 +6,7 @@
  *         Open http://localhost:8011 in browser.
  *
  * - Serves static files from current directory (index.html, css/, js/, models/)
- * - Proxies /v1/* requests to https://your-gateway.example.com with CORS headers
+ * - Proxies /v1/* requests to OPENAB_GATEWAY with CORS headers
  * - No need for `npx serve` or separate terminals
  */
 import http from 'node:http';
@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TARGET = 'your-gateway.example.com';
+const TARGET = process.env.OPENAB_GATEWAY || 'your-gateway.example.com';
 const PORT = 8011;
 
 const MIME = {
