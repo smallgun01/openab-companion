@@ -121,8 +121,6 @@ export async function loadVRM(buffer, name = 'model') {
  * Rotations are NOT reset by vrm.update() — they stick for the lifetime of the model.
  */
 function applyRestPose(vrm, specVersion) {
-  if (specVersion !== '0.0') return;
-
   const armAngle = 60.0 * Math.PI / 180.0;
   const forearmAngle = 5.0 * Math.PI / 180.0;
 
@@ -145,8 +143,10 @@ function applyRestPose(vrm, specVersion) {
     '| specVersion:', specVersion,
     '| rest pose applied:', Object.keys(restPoseRotations).length > 0);
 
-  // Debug: expose for console testing
-  window.__vrm = vrm;
+  // Debug: only expose on localhost
+  if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') {
+    window.__vrm = vrm;
+  }
 }
 
 export function getVRM() {

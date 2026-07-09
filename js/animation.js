@@ -82,6 +82,12 @@ let animBlendFromPose = {};    // boneName → Quaternion (captured at play star
 let animBoneNames = new Set(); // all bone names in current clip
 const ANIM_BLEND_IN = 0.25;
 
+// Reusable quaternions for per-frame sampling (avoid GC pressure)
+const _quatA = new THREE.Quaternion();
+const _quatB = new THREE.Quaternion();
+const _quatResult = new THREE.Quaternion();
+const _quatFrom = new THREE.Quaternion();
+
 /* ── Clip loading ─────────────────────────────────────── */
 
 /**
@@ -130,7 +136,10 @@ export function getClip(name) {
  */
 export function playClip(vrm, name) {
   const clip = clips.get(name);
-  if (!clip || !vrm) return false;
+  if (!clip || !vrm) {
+    if (!clip) console.warn(`[animation] clip "${name}" not found`);
+    return false;
+  }
 
   animClip = clip;
   animStartTime = performance.now() / 1000;
@@ -260,13 +269,8 @@ export function sampleClip(now, vrm, restPoseRotations) {
   // Blend-in factor (first 0.25s)
   const blendFactor = Math.min((now - animStartTime) / ANIM_BLEND_IN, 1.0);
 
-  // Collect all bone names from both frames
+  // Collect all bone names from both frames (must be per-frame since returned to caller)
   const boneNames = new Set([...Object.keys(frameA.bones), ...Object.keys(frameB.bones)]);
-
-  const quatA = new THREE.Quaternion();
-  const quatB = new THREE.Quaternion();
-  const quatResult = new THREE.Quaternion();
-  const quatFrom = new THREE.Quaternion();
 
   for (const boneName of boneNames) {
     const vrmBoneName = BONE_NAME_MAP[boneName];
@@ -279,19 +283,19 @@ export function sampleClip(now, vrm, restPoseRotations) {
     const aArr = frameA.bones[boneName] || [0, 0, 0, 1];
     const bArr = frameB.bones[boneName] || [0, 0, 0, 1];
 
-    quatA.set(aArr[0], aArr[1], aArr[2], aArr[3]);
-    quatB.set(bArr[0], bArr[1], bArr[2], bArr[3]);
+    _quatA.set(aArr[0], aArr[1], aArr[2], aArr[3]);
+    _quatB.set(bArr[0], bArr[1], bArr[2], bArr[3]);
 
     // Slerp between keyframes
-    quatResult.slerpQuaternions(quatA, quatB, t);
+    _quatResult.slerpQuaternions(_quatA, _quatB, t);
 
     // Blend from pre-animation pose during first ANIM_BLEND_IN seconds
     if (blendFactor < 1.0 && animBlendFromPose[boneName]) {
-      quatFrom.copy(animBlendFromPose[boneName]);
-      quatResult.slerpQuaternions(quatFrom, quatResult, blendFactor);
+      _quatFrom.copy(animBlendFromPose[boneName]);
+      _quatResult.slerpQuaternions(_quatFrom, _quatResult, blendFactor);
     }
 
-    node.quaternion.copy(quatResult);
+    node.quaternion.copy(_quatResult);
   }
 
   return boneNames;

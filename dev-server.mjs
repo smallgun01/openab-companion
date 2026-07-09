@@ -52,6 +52,10 @@ function serveFile(res, filePath) {
 }
 
 function proxyToGateway(req, res) {
+  // ⚠️ DEV ONLY — TLS verification is disabled for local development.
+  // NEVER use this in production. The Authorization header is forwarded
+  // in plain text to any MITM attacker when rejectUnauthorized is false.
+
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -106,6 +110,12 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
+  // ⚠️ Refuse to start in production — the proxy has rejectUnauthorized: false
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ FATAL: dev-server.mjs must not run in production (rejectUnauthorized is disabled).');
+    process.exit(1);
+  }
+
   console.log(`\n🔺 OpenAB Companion dev server`);
   console.log(`   http://localhost:${PORT}  ←  open this in your browser`);
   console.log(`   API proxy → https://${TARGET}/v1/*\n`);

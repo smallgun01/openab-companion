@@ -33,6 +33,13 @@ let isStreaming = false;
 let retryCount = 0;
 const MAX_RETRIES = 3;
 
+/* Emotion → animation mapping */
+const EMOTION_CLIPS = {
+  happy: 'wave', excited: 'wave',
+  thinking: 'think', confused: 'think',
+  surprised: 'nod',
+};
+
 /* ── DOM refs ─────────────────────────────────────────── */
 const app          = document.getElementById('app');
 const canvas       = document.getElementById('vrm-canvas');
@@ -61,8 +68,8 @@ async function init() {
     // Wait for VRM module to load (or fail)
     await vrmReady;
 
-    // Preload animation clips (non-blocking)
-    if (vrmAvailable) loadClips();
+    // Preload animation clips
+    if (vrmAvailable) await loadClips();
 
     // VRM Scene (may be unavailable — chat still works)
     if (vrmAvailable && initScene) {
@@ -70,8 +77,8 @@ async function init() {
       window.addEventListener('resize', () => canvas.style.width = '');
     } else {
       // VRM unavailable — show a friendly placeholder
-      const hint = vrmErrorMsg ? `<br><span style="font-size:0.7rem;color:#999">${vrmErrorMsg}</span>` : '';
-      modelPrompt.innerHTML = `<p>🎭 3D renderer unavailable${hint}</p><p style="font-size:0.8rem">Chat still works — set your endpoint in Settings (⚙️)</p>`;
+      const hint = vrmErrorMsg ? ` (${vrmErrorMsg})` : '';
+      modelPrompt.textContent = `🎭 3D renderer unavailable${hint}. Chat still works — set your endpoint in Settings (⚙️).`;
     }
 
     // Apply saved background
@@ -137,12 +144,14 @@ function wireEvents() {
 
 /* ── Message Handling ─────────────────────────────────── */
 
-async function handleSend() {
-  const text = chatInput.value.trim();
+async function handleSend(textOverride) {
+  const text = textOverride || chatInput.value.trim();
   if (!text || isStreaming) return;
 
-  chatInput.value = '';
-  chatInput.style.height = 'auto';
+  if (!textOverride) {
+    chatInput.value = '';
+    chatInput.style.height = 'auto';
+  }
 
   addBubble('user', text);
   const assistantBubble = addBubble('assistant', '', true);
@@ -193,11 +202,6 @@ async function handleSend() {
         // Stop talk gesture → apply emotion-based animation
         stopClip(vrm2, vrmRestPoseRotations);
         const lastEmotion = getLastEmotion();
-        const EMOTION_CLIPS = {
-          happy: 'wave', excited: 'wave',
-          thinking: 'think', confused: 'think',
-          surprised: 'nod',
-        };
         const animName = EMOTION_CLIPS[lastEmotion];
         if (animName) {
           playClip(vrm2, animName);
@@ -216,7 +220,7 @@ async function handleSend() {
       if (code === 429 && retryCount < MAX_RETRIES) {
         retryCount++;
         addBubble('system', `⚠️ Server busy — retry ${retryCount}/${MAX_RETRIES}…`);
-        setTimeout(() => handleSend(), 3000);
+        setTimeout(() => handleSend(text), 3000);
         return;
       }
 

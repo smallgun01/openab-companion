@@ -4,7 +4,8 @@
  *   sendMessage({ text, endpoint, token, onChunk, onDone, onError, signal })
  */
 
-const SSE_LINE_RE = /^data:\s*(.*)$/;
+// SSE field-line parser: matches data:, event:, id:, retry: prefixes
+const SSE_FIELD_RE = /^(data|event|id|retry):\s*(.*)$/i;
 
 /**
  * Send a chat message to OpenAB and stream the response.
@@ -32,18 +33,33 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
     stream: true,
   });
 
+  // ── Fetch with 60s timeout ──
+  const FETCH_TIMEOUT_MS = 60000;
+  const timeoutController = new AbortController();
+  let timeoutId;
+
+  // Propagate external abort signal to our timeout controller
+  if (signal) {
+    if (signal.aborted) return;
+    signal.addEventListener('abort', () => timeoutController.abort(signal.reason));
+  }
+
   let response;
   try {
+    timeoutId = setTimeout(() => timeoutController.abort(new Error('Request timeout')), FETCH_TIMEOUT_MS);
+
     response = await fetch(endpoint, {
       method: 'POST',
       headers,
       body,
-      signal,
+      signal: timeoutController.signal,
     });
   } catch (err) {
     if (err.name === 'AbortError') return;
     onError?.(0, err.message || 'Network error');
     return;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 
   if (!response.ok) {
@@ -62,6 +78,8 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
   const decoder = new TextDecoder();
   let buffer = '';
   let fullText = '';
+  let lastId = '';
+  let retryMs = 0;
 
   try {
     while (true) {
@@ -77,27 +95,49 @@ export async function sendMessage({ text, endpoint, token, onChunk, onDone, onEr
         const trimmed = line.trim();
         if (!trimmed) continue;
 
-        const match = trimmed.match(SSE_LINE_RE);
+        const match = trimmed.match(SSE_FIELD_RE);
         if (!match) continue;
 
-        const data = match[1];
+        const [, field, value] = match;
 
-        // SSE end signal
-        if (data === '[DONE]') {
-          reader.cancel();
-          onDone?.(fullText);
-          return;
-        }
+        switch (field.toLowerCase()) {
+          case 'event':
+            // event: done → treat as stream end (even before data: [DONE])
+            if (value === 'done') {
+              reader.cancel();
+              onDone?.(fullText);
+              return;
+            }
+            break;
 
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed?.choices?.[0]?.delta?.content;
-          if (delta) {
-            fullText += delta;
-            onChunk?.(delta);
+          case 'id':
+            lastId = value;
+            break;
+
+          case 'retry':
+            retryMs = parseInt(value, 10) || 0;
+            break;
+
+          case 'data': {
+            // SSE end signal
+            if (value === '[DONE]') {
+              reader.cancel();
+              onDone?.(fullText);
+              return;
+            }
+
+            try {
+              const parsed = JSON.parse(value);
+              const delta = parsed?.choices?.[0]?.delta?.content;
+              if (delta) {
+                fullText += delta;
+                onChunk?.(delta);
+              }
+            } catch {
+              // skip unparseable data lines
+            }
+            break;
           }
-        } catch {
-          // skip unparseable data lines
         }
       }
     }
