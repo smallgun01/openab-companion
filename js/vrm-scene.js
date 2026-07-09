@@ -109,7 +109,7 @@ export async function loadVRM(buffer, name = 'model') {
     currentVRM = vrm;
 
     // ── Apply rest pose: arms down from T-pose ──
-    applyRestPose(vrm, isVRM1);
+    applyRestPose(vrm, isVRM1, specVersion);
 
     idleStartTime = performance.now() / 1000;
     lastBlinkTime = idleStartTime;
@@ -127,7 +127,7 @@ export async function loadVRM(buffer, name = 'model') {
  * Apply A-pose from T-pose. Called once after load.
  * Rotations are NOT reset by vrm.update() — they stick for the lifetime of the model.
  */
-function applyRestPose(vrm, isVRM1) {
+function applyRestPose(vrm, isVRM1, specVersion) {
   const armAngle = 60.0 * Math.PI / 180.0;
   const forearmAngle = 5.0 * Math.PI / 180.0;
 
@@ -153,7 +153,9 @@ function applyRestPose(vrm, isVRM1) {
 
     // Also try normalized bones as fallback
     if (Object.keys(restPoseRotations).length === 0) {
+      const allNames = []; vrm.scene.traverse(n => { if (n.name) allNames.push(n.name); }); console.log("[vrm-scene] All scene bone names:", allNames.slice(0, 30));
       console.warn('[vrm-scene] No VRM 1.0 bones found by name, trying normalized nodes...');
+      console.log("[vrm-scene] Available bone names:", [...new Set(Array.from(vrm.scene.children).flatMap(c => { const names = []; c.traverse(n => { if (n.name) names.push(n.name); }); return names; }))].slice(0, 20));
       const poses = [
         [VRMHumanBoneName.LeftUpperArm, armAngle],
         [VRMHumanBoneName.RightUpperArm, -armAngle],
