@@ -125,20 +125,26 @@ export async function loadVRM(buffer, name = 'model') {
  * Rotations are NOT reset by vrm.update() — they stick for the lifetime of the model.
  */
 function applyRestPose(vrm, specVersion) {
-// getNormalizedBoneNode() normalizes bone space for both VRM 0.x and 1.0.
-  // The A-pose assumption (60° arms) applies to both specs.
+  // Both VRM 0.x and 1.0 use Z-axis arm rotation.
+  // VRM 1.0 uses getRawBoneNode (normalized bones may reorient local axes).
+  const isVRM1 = specVersion === '1.0';
+  const rotAxis = new THREE.Vector3(0, 0, 1);
   const armAngle = 60.0 * Math.PI / 180.0;
   const forearmAngle = 5.0 * Math.PI / 180.0;
 
   const poses = [
-    [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), armAngle)],
-    [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -armAngle)],
-    [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), forearmAngle)],
-    [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -forearmAngle)],
+    [VRMHumanBoneName.LeftUpperArm,  new THREE.Quaternion().setFromAxisAngle(rotAxis, armAngle)],
+    [VRMHumanBoneName.RightUpperArm, new THREE.Quaternion().setFromAxisAngle(rotAxis, -armAngle)],
+    [VRMHumanBoneName.LeftLowerArm,  new THREE.Quaternion().setFromAxisAngle(rotAxis,  forearmAngle)],
+    [VRMHumanBoneName.RightLowerArm, new THREE.Quaternion().setFromAxisAngle(rotAxis, -forearmAngle)],
   ];
 
   for (const [boneName, quat] of poses) {
-    const node = vrm.humanoid?.getNormalizedBoneNode?.(boneName);
+    // VRM 0.x: getNormalizedBoneNode after rotateVRM0
+    // VRM 1.0: getRawBoneNode (normalized bones may have different local axes)
+    const node = isVRM1
+      ? (vrm.humanoid?.getRawBoneNode?.(boneName) ?? vrm.humanoid?.getNormalizedBoneNode?.(boneName))
+      : vrm.humanoid?.getNormalizedBoneNode?.(boneName);
     if (node) {
       node.quaternion.copy(quat);
       restPoseRotations[boneName] = quat.clone();
