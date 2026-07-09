@@ -2,19 +2,16 @@
 
 > Give OpenAB a face — lightweight web VRM character chat interface.
 
-A zero-build-step single-page app: vanilla JS + three.js + @pixiv/three-vrm, talking to an OpenAB backend via SSE streaming.
+1,734 lines of vanilla JS. Zero build steps. Two CDN dependencies. Talking to an OpenAB backend via SSE streaming.
 
 ---
 
 ## Quick Start
 
 ```bash
-cd openab-companion
-npx serve .
-# or: python3 -m http.server 8000
+node dev-server.mjs
+# Open http://localhost:8011
 ```
-
-Open `http://localhost:3000` (or `:8000`).
 
 1. Load a `.vrm` model via the file picker (persisted in IndexedDB)
 2. Configure your OpenAB endpoint + token in Settings (⚙️)
@@ -25,20 +22,28 @@ Open `http://localhost:3000` (or `:8000`).
 ## Architecture
 
 ```
-Browser                         Backend
-┌─────────────────────────┐     ┌──────────────────┐
-│ VRM Scene   Chat UI     │────▶│ OpenAB Gateway   │
-│ (THREE.js)  (SSE fetch) │     │ VTuber Adapter   │
-│                          │     │ Persistent ACP   │
-│ expression  settings    │     └──────────────────┘
-│ parser      (localStg)  │
-└─────────────────────────┘
+Browser                                   Backend
+┌──────────────────────────────────┐     ┌──────────────────┐
+│ main.js                          │────▶│ OpenAB Gateway    │
+│  ├── vrm-scene.js  3D rendering │     │ (your-gateway.example.com)      │
+│  ├── chat.js       SSE stream   │     │ /v1/chat/complete │
+│  ├── expression.js emotion tags │     └──────────────────┘
+│  ├── animation.js  bone clips   │
+│  └── settings.js   persistence  │
+└──────────────────────────────────┘
 ```
 
-- **VRM scene**: three.js canvas with idle animations (breathing + blinking)
-- **Chat**: SSE streaming via `fetch()` + `ReadableStream`
-- **Expressions**: `[happy]`, `[sad]`, `[angry]`, etc. parsed from responses, lerp-applied to VRM
-- **Settings**: endpoint/token in localStorage, model binary in IndexedDB
+- **VRM Scene**: THREE.js canvas with idle animations (breathing, head sway, blinking)
+- **Chat**: SSE streaming via `fetch()` + `ReadableStream` — full `event:`/`id:`/`retry:`/`data:` field parser
+- **Expressions**: 19 emotion tags (`[happy]`, `[sad]`, `[angry]`, `[surprised]`, `[relaxed]`, `[thinking]`, `[confused]`, `[excited]`, `[neutral]`, plus blends) parsed from responses, lerp-applied to VRM
+- **Animation**: Skeletal bone animation engine — binary search keyframe lookup + slerp interpolation across 5 clips. Per-frame quaternion reuse (zero GC pressure)
+- **Settings**: endpoint/token in localStorage, VRM model binary in IndexedDB
+
+---
+
+## VRM Support
+
+VRM 0.x and 1.0. Rest pose (A-pose from T-pose) applied on load via `getNormalizedBoneNode()`. Tested with Alicia Solid (0.x) and custom VRM 1.0 models.
 
 ---
 
@@ -46,37 +51,40 @@ Browser                         Backend
 
 ```
 openab-companion/
-├── index.html          # Entry point
+├── index.html           Entry point + CSP meta tag
+├── dev-server.mjs       Static file server + CORS proxy (⚠️ DEV ONLY)
 ├── css/
-│   └── style.css       # All styles
+│   └── style.css        All styles
 ├── js/
-│   ├── main.js         # Init + wire modules
-│   ├── vrm-scene.js    # THREE scene, VRM load, idle anim
-│   ├── expression.js   # [emotion] parser + VRM control
-│   ├── chat.js         # SSE fetch + stream parser
-│   └── settings.js     # localStorage + IndexedDB
-├── models/             # Place .vrm files here
+│   ├── main.js          Init, event wiring, message handling
+│   ├── vrm-scene.js     THREE.js scene, VRM loader, idle animations
+│   ├── chat.js          SSE fetch + stream parser (60s timeout)
+│   ├── expression.js    Emotion tag parser + VRM expression control
+│   ├── animation.js     Skeletal bone animation engine
+│   └── settings.js      localStorage + IndexedDB persistence
+├── animations/          JSON clip files (idle, wave, nod, think, talk)
+├── models/              Place .vrm files here
 ├── README.md
 └── LICENSE
 ```
 
 ---
 
-## Dependencies (CDN)
+## Dependencies (CDN, no npm)
 
-```js
+```
 three@0.170
 @pixiv/three-vrm@3
 ```
 
-All imported as ES modules from jsDelivr. No npm, no bundler, no node_modules.
+Imported as ES modules from jsDelivr. No bundler. No node_modules.
 
 ---
 
-## Supported Emotion Tags
+## Emotion Tags
 
 | Tag | Expression |
-|-----|-----------|
+|---|---|
 | `[happy]` | Happy |
 | `[sad]` | Sad |
 | `[angry]` | Angry |
@@ -87,7 +95,7 @@ All imported as ES modules from jsDelivr. No npm, no bundler, no node_modules.
 | `[excited]` | Happy + Surprised blend |
 | `[neutral]` | Neutral |
 
-Tags are stripped from displayed text and applied with 300ms lerp transitions.
+Tags are stripped from displayed text and applied with lerp transitions.
 
 ---
 
@@ -102,7 +110,27 @@ POST /v1/chat/completions
 }
 ```
 
-Only the latest user message is sent. History is maintained by the OpenAB persistent ACP session.
+History is maintained by the OpenAB persistent ACP session. Only the latest user message is sent.
+
+---
+
+## Security
+
+- CSP header via `<meta>` tag: `script-src 'self'` + CDN whitelist, `connect-src 'self' https:`
+- Chat messages rendered with `textContent` (XSS-safe)
+- `dev-server.mjs` refuses to start in production (`NODE_ENV=production`)
+- Token stored in localStorage (known tradeoff — see [#4](https://github.com/smallgun01/openab-companion/issues/4))
+
+---
+
+## Known Limitations
+
+- Token in localStorage (XSS surface)
+- No test coverage / CI
+- 40万-line animation JSON loaded eagerly
+- `connect-src: https:` allows any HTTPS endpoint (tradeoff for user-configurable backends)
+
+See [open issues](https://github.com/smallgun01/openab-companion/issues).
 
 ---
 
