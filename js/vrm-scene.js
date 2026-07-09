@@ -128,7 +128,7 @@ function applyRestPose(vrm, specVersion) {
   const isVRM1 = specVersion === '1.0';
   // VRM 0.x (after rotateVRM0): Z-axis lowers arms from T-pose
   // VRM 1.0 (normalized bones): X-axis lowers arms from T-pose
-  const axis = isVRM1
+  const axis = new THREE.Vector3(0, 0, 1);
     ? new THREE.Vector3(1, 0, 0)
     : new THREE.Vector3(0, 0, 1);
   const armAngle = 60.0 * Math.PI / 180.0;
@@ -148,7 +148,11 @@ function applyRestPose(vrm, specVersion) {
   for (const [boneName, quat] of poses) {
     const node = vrm.humanoid?.getNormalizedBoneNode?.(boneName);
     if (node) {
-      node.quaternion.copy(quat);
+      if (isVRM1) {
+        node.quaternion.multiply(quat);
+      } else {
+        node.quaternion.copy(quat);
+      }
       console.log("[vrm-scene] rest pose:", boneName, "→ OK");
       restPoseRotations[boneName] = quat.clone();
     } else {
